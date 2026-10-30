@@ -1,3 +1,23 @@
+# ── Private data: NEVER commit respondent-level files ──────────────────────
+data/raw/*
+!data/raw/README.md
+*.sas7bdat
+*.sav
+*.dta
+
+# Python / uv
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ── Standard Python template (from GitHub) ──────────────────────────────────
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

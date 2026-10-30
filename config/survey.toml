@@ -1,0 +1,185 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  survey.toml — the ONE file you edit to adapt this dashboard to your survey.
+#
+#  After editing, rebuild the public data file:   make aggregate
+#  Then check it is safe to publish:               make test
+#  See docs/CUSTOMIZING.md for worked examples of every section below.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Text shown on the website ────────────────────────────────────────────────
+[site]
+title    = "How healthy are Canadians?"
+eyebrow  = "CanHealth 2024 · Fictitious survey"
+lede     = "Explore 13 health indicators across provinces, age, gender, income and education. Pick an indicator, choose how to compare, and narrow to a group."
+footer   = "CanHealth 2024 (fictitious survey). Synthetic data for demonstration."
+locale   = "en-CA"              # number and date formatting
+
+# Default view when someone opens the page with no link parameters.
+default_indicator = "srh_good"
+default_compare   = "province"
+
+# ── Where the private microdata lives ────────────────────────────────────────
+# This file is read ONLY by the build step. It is never copied into site/.
+[source]
+path   = "data/raw/microdata.parquet"
+format = "parquet"              # "parquet" | "csv" | "delta" (a Delta table folder)
+weight = "survey_weight"        # column with survey weights; use "" for unweighted
+
+# ── Disclosure control ───────────────────────────────────────────────────────
+# Raising any of these makes the output safer and sparser. See docs/DISCLOSURE.md.
+[rules]
+min_cell   = 10                 # hide any group with fewer respondents than this
+min_event  = 3                  # hide a % when fewer than this many people are on either side of it
+round_base = 5                  # round published respondent counts to this base
+cv_e       = 16.6               # CV (%) above which an estimate gets an "E" (use with caution)
+cv_f       = 33.3               # CV (%) above which an estimate is hidden
+
+# ── Dimensions: the "Compare by" and "Narrow to" options ─────────────────────
+# column = column name in the microdata (or a new name, if you use `expr`)
+# expr   = OPTIONAL SQL to compute the groups, e.g. banding a numeric age:
+#          expr = "CASE WHEN age < 35 THEN 'Under 35' ELSE '35+' END"
+# label  = what users see
+# levels = values to show, in display order. Values not listed are ignored.
+#          Leave levels out to use every value found, sorted alphabetically.
+# The order of the [[dimensions]] blocks is the order of the "Compare by" chips.
+
+[[dimensions]]
+column = "province"
+label  = "Province"
+levels = ["Newfoundland", "PEI", "Nova Scotia", "New Brunswick", "Quebec", "Ontario",
+          "Manitoba", "Saskatchewan", "Alberta", "British Columbia", "Territories"]
+
+[[dimensions]]
+column = "age_group"
+label  = "Age group"
+levels = ["18–24", "25–34", "35–44", "45–54", "55–64", "65–74", "75+"]
+
+[[dimensions]]
+column = "gender"
+label  = "Gender"
+levels = ["Woman", "Man", "Non-binary / Other", "Prefer not to say"]
+
+[[dimensions]]
+column = "income_bracket"
+label  = "Household income"
+levels = ["Under $30K", "$30K–$59K", "$60K–$99K", "$100K–$149K", "$150K+"]
+
+[[dimensions]]
+column = "education"
+label  = "Education"
+levels = ["Less than high school", "High school diploma", "College / trades",
+          "Undergraduate degree", "Graduate degree"]
+
+# ── Indicators: what gets measured ───────────────────────────────────────────
+# Every indicator is "% of people for whom `when` is true".
+# id     = short unique key (letters, digits, underscore). Appears in shared links.
+# label  = full name (chart titles, dropdown)
+# short  = compact name (heatmap column headers, tiles)
+# theme  = groups the dropdown into sections
+# better = "higher" or "lower": which direction is good (colours the heatmap)
+# when   = a DuckDB SQL condition over the microdata columns. Rows where it is
+#          NULL are excluded from that indicator's denominator.
+
+[[indicators]]
+id = "srh_good"
+label = "Very good or excellent health"
+short = "Very good / excellent health"
+theme = "General health"
+better = "higher"
+when = "self_rated_health IN ('Very good', 'Excellent')"
+
+[[indicators]]
+id = "any_chronic"
+label = "Has a chronic condition"
+short = "Any chronic condition"
+theme = "Chronic conditions"
+better = "lower"
+when = "any_chronic = 1"
+
+[[indicators]]
+id = "hypertension"
+label = "High blood pressure"
+short = "High blood pressure"
+theme = "Chronic conditions"
+better = "lower"
+when = "hypertension = 1"
+
+[[indicators]]
+id = "diabetes"
+label = "Diabetes"
+short = "Diabetes"
+theme = "Chronic conditions"
+better = "lower"
+when = "diabetes = 1"
+
+[[indicators]]
+id = "arthritis"
+label = "Arthritis"
+short = "Arthritis"
+theme = "Chronic conditions"
+better = "lower"
+when = "arthritis = 1"
+
+[[indicators]]
+id = "heart_disease"
+label = "Heart disease"
+short = "Heart disease"
+theme = "Chronic conditions"
+better = "lower"
+when = "heart_disease = 1"
+
+[[indicators]]
+id = "depression"
+label = "Depression"
+short = "Depression"
+theme = "Mental health"
+better = "lower"
+when = "depression = 1"
+
+[[indicators]]
+id = "anxiety"
+label = "Anxiety"
+short = "Anxiety"
+theme = "Mental health"
+better = "lower"
+when = "anxiety = 1"
+
+[[indicators]]
+id = "obesity"
+label = "Obesity (BMI 30 or more)"
+short = "Obesity"
+theme = "Lifestyle"
+better = "lower"
+when = "bmi >= 30"
+
+[[indicators]]
+id = "active"
+label = "Active 150+ minutes a week"
+short = "Active 150+ min/week"
+theme = "Lifestyle"
+better = "higher"
+when = "physical_activity LIKE 'Moderate%' OR physical_activity LIKE 'High%'"
+
+[[indicators]]
+id = "smoker"
+label = "Currently smokes"
+short = "Current smoker"
+theme = "Lifestyle"
+better = "lower"
+when = "smoking_status LIKE 'Current%'"
+
+[[indicators]]
+id = "family_doctor"
+label = "Has a family doctor"
+short = "Has family doctor"
+theme = "Access to care"
+better = "higher"
+when = "has_family_doctor = 1"
+
+[[indicators]]
+id = "unmet_need"
+label = "Unmet health care need"
+short = "Unmet care need"
+theme = "Access to care"
+better = "lower"
+when = "unmet_care_need = 1"

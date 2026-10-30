@@ -1,0 +1,29 @@
+# Runs on every push and pull request.
+#  • checks  — tests the committed public file + the suppression logic (no microdata needed)
+#  • demo    — proves the whole pipeline works end to end on synthetic data
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --locked
+      - name: Check site/data/aggregates.json is safe to publish
+        run: uv run pytest
+
+  demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --locked
+      - run: uv run python pipeline/generate_demo_data.py
+      - run: uv run python pipeline/build_aggregates.py
+      - name: Tests, including checks against the microdata
+        run: uv run pytest
