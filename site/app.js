@@ -251,7 +251,7 @@ function renderTiles() {
   tiles.push(el("div", { class: "tile" },
     el("p", { class: "tile-label", text: "Respondents in view" }),
     el("p", { class: "tile-value", text: n != null ? fmtN(n) : "x" }),
-    el("p", { class: "tile-note", text: hidden ? `${hidden} group${hidden > 1 ? "s" : ""} hidden to protect privacy` : "Counts rounded to nearest 5" }),
+    el("p", { class: "tile-note", text: hidden ? `${hidden} group${hidden > 1 ? "s" : ""} not shown (privacy or reliability)` : "Counts rounded to nearest 5" }),
   ));
   $("#tiles").replaceChildren(...tiles);
 }

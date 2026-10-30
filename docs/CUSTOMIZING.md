@@ -97,7 +97,8 @@ If you make a typo, `make aggregate` names the indicator and shows DuckDB's erro
 ```
 ❌ Indicator 'frequent_drinker': the `when` condition failed:
   alcohol_freq = '3+ times/week'
-  Binder Error: Referencing column "alcohol_freq" not found... Candidate bindings: "alcohol_frequency"
+  Binder Error: Referenced column "alcohol_freq" not found in FROM clause!
+Candidate bindings: "alcohol_frequency", ...
 ```
 
 **To remove an indicator,** delete its block. **To reorder,** move blocks: the dropdown and heatmap
