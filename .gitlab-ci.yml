@@ -20,11 +20,21 @@ test:
     - uv sync --locked
     - uv run pytest
 
+accessibility:
+  stage: test
+  # Playwright's image ships Chromium and its system libraries; uv is installed on top.
+  image: mcr.microsoft.com/playwright/python:v1.63.0-noble
+  before_script:
+    - pip install uv
+  script:
+    - uv sync --locked
+    - uv run pytest -m a11y tests/a11y
+
 pages:
   stage: deploy
   script:
     - uv sync --locked
-    - uv run pytest tests/test_public_file.py
+    - uv run pytest tests/test_public_file.py tests/test_i18n.py tests/test_contrast.py
     - cp -r site public
   artifacts:
     paths: [public]

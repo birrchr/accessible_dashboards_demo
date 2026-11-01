@@ -1,5 +1,10 @@
 <!DOCTYPE html>
-<!-- Page text comes from config/survey.toml [site] via data/aggregates.json. Layout lives here; styling in styles.css. -->
+<!--
+  Page structure only. Words come from two places:
+    • survey content (title, indicators, groups) → config/survey.toml → data/aggregates.json
+    • interface text (buttons, legends, screen-reader text) → i18n.js
+  Elements with data-i18n="key" get their text from i18n.js at load and on language switch.
+-->
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -9,7 +14,7 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <a class="skip" href="#main">Skip to results</a>
+  <a class="skip" href="#main" data-i18n="skip">Skip to results</a>
 
   <header class="site-header">
     <div class="wrap header-inner">
@@ -18,76 +23,87 @@
         <h1 id="site-title">Loading…</h1>
         <p class="lede" id="site-lede"></p>
       </div>
-      <button class="icon-btn" id="theme-toggle" type="button" aria-label="Switch colour theme">
-        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg>
-      </button>
+      <div class="header-tools">
+        <a class="lang-btn" id="lang-toggle" href="#" hidden></a>
+        <button class="icon-btn" id="theme-toggle" type="button" aria-pressed="false">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg>
+          <span class="sr-only" data-i18n="themeDark">Dark theme</span>
+        </button>
+      </div>
     </div>
   </header>
 
-  <!-- Mobile: compact summary bar that opens the filter sheet -->
+  <!-- Small screens: a compact summary bar that opens the filters as a modal sheet -->
   <div class="summary-bar" id="summary-bar">
     <div class="wrap summary-inner">
-      <button type="button" class="summary-btn" id="open-filters" aria-controls="controls" aria-expanded="false">
-        <span class="summary-text" id="summary-text">Loading…</span>
-        <span class="summary-edit">
-          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M3 6h18v2H3zm4 5h10v2H7zm3 5h4v2h-4z"/></svg>
-          Filters
+      <button type="button" class="summary-btn" id="open-filters" aria-haspopup="dialog" aria-expanded="false" aria-controls="controls">
+        <span class="summary-text" id="summary-text"></span>
+        <span class="summary-edit" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" focusable="false"><path fill="currentColor" d="M3 6h18v2H3zm4 5h10v2H7zm3 5h4v2h-4z"/></svg>
+          <span data-i18n="filters">Filters</span>
         </span>
+        <span class="sr-only" data-i18n="filters">Filters</span>
       </button>
     </div>
   </div>
 
   <div class="sheet-backdrop" id="backdrop" hidden></div>
 
-  <section class="controls" id="controls" aria-label="Filters">
+  <section class="controls" id="controls" aria-labelledby="filters-title">
     <div class="wrap controls-inner">
       <div class="sheet-head">
-        <h2>Filters</h2>
-        <button type="button" class="icon-btn" id="close-filters" aria-label="Close filters">
-          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19l5.6-5.6 5.6 5.6 1.4-1.4-5.6-5.6L19 6.4 17.6 5 12 10.6z"/></svg>
+        <h2 id="filters-title" data-i18n="filters">Filters</h2>
+        <button type="button" class="icon-btn" id="close-filters">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path fill="currentColor" d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19l5.6-5.6 5.6 5.6 1.4-1.4-5.6-5.6L19 6.4 17.6 5 12 10.6z"/></svg>
+          <span class="sr-only" data-i18n="closeFilters">Close filters</span>
         </button>
       </div>
-      <label class="field">
-        <span class="field-label">Indicator</span>
+      <div class="field">
+        <label class="field-label" for="indicator" data-i18n="indicator">Indicator</label>
         <select id="indicator"></select>
-      </label>
+      </div>
       <fieldset class="field">
-        <legend class="field-label">Compare by</legend>
-        <div class="chips" id="compare" role="radiogroup"></div>
+        <legend class="field-label" id="compare-label" data-i18n="compareBy">Compare by</legend>
+        <div class="chips" id="compare" role="radiogroup" aria-labelledby="compare-label"></div>
       </fieldset>
-      <label class="field">
-        <span class="field-label">Narrow to</span>
+      <div class="field">
+        <label class="field-label" for="slice" data-i18n="narrowTo">Narrow to</label>
         <select id="slice"></select>
-      </label>
+      </div>
       <div class="field field-actions">
-        <button type="button" class="text-btn" id="reset">Reset</button>
-        <button type="button" class="text-btn" id="share">Copy link</button>
-        <button type="button" class="primary-btn" id="apply-filters">Show results</button>
+        <button type="button" class="text-btn" id="reset" data-i18n="reset">Reset</button>
+        <button type="button" class="text-btn" id="share" data-i18n="copyLink">Copy link</button>
+        <button type="button" class="primary-btn" id="apply-filters" data-i18n="showResults">Show results</button>
       </div>
     </div>
   </section>
 
-  <main id="main" class="wrap">
-    <section class="tiles" id="tiles" aria-live="polite"></section>
+  <main id="main" class="wrap" tabindex="-1">
+    <section aria-labelledby="tiles-title">
+      <h2 class="sr-only" id="tiles-title" data-i18n="summaryHeading">Summary</h2>
+      <div class="tiles" id="tiles"></div>
+    </section>
 
     <section class="card" aria-labelledby="dot-title">
       <div class="card-head">
         <div>
           <h2 id="dot-title">—</h2>
           <p class="card-sub" id="dot-sub"></p>
+          <p class="card-sub" data-i18n="weightedCI"></p>
         </div>
         <div class="card-tools">
-          <div class="seg" role="group" aria-label="Sort order">
-            <button type="button" data-sort="natural" aria-pressed="true">Category order</button>
-            <button type="button" data-sort="value" aria-pressed="false">Highest first</button>
+          <div class="seg" role="group" id="sort-group">
+            <button type="button" data-sort="natural" aria-pressed="true" data-i18n="sortNatural">Category order</button>
+            <button type="button" data-sort="value" aria-pressed="false" data-i18n="sortValue">Highest first</button>
           </div>
-          <div class="seg" role="group" aria-label="View">
-            <button type="button" data-view="chart" aria-pressed="true">Chart</button>
-            <button type="button" data-view="table" aria-pressed="false">Table</button>
+          <div class="seg" role="group" id="view-group">
+            <button type="button" data-view="chart" aria-pressed="true" data-i18n="viewChart">Chart</button>
+            <button type="button" data-view="table" aria-pressed="false" data-i18n="viewTable">Table</button>
           </div>
-          <button type="button" class="text-btn" id="download">Download CSV</button>
+          <button type="button" class="text-btn" id="download" data-i18n="downloadCsv">Download CSV</button>
         </div>
       </div>
+      <p class="sr-only" id="chart-help" data-i18n="chartHelp"></p>
       <div id="dot-chart" class="dot-chart"></div>
       <div id="dot-table" class="table-wrap" hidden></div>
       <p class="key" id="dot-key"></p>
@@ -96,27 +112,37 @@
     <section class="card" aria-labelledby="heat-title">
       <div class="card-head">
         <div>
-          <h2 id="heat-title">All indicators at a glance</h2>
+          <h2 id="heat-title" data-i18n="heatTitle">All indicators at a glance</h2>
           <p class="card-sub" id="heat-sub"></p>
         </div>
       </div>
       <div class="heat-legend" id="heat-legend"></div>
       <div class="table-wrap heat-wrap" id="heatmap"></div>
-      <p class="key">Tap or click an indicator name to chart it. Colour shows the gap from the average for the group you’ve narrowed to, in percentage points.</p>
+      <p class="key" data-i18n="heatNote"></p>
     </section>
 
     <section class="card about" aria-labelledby="about-title">
-      <h2 id="about-title">How this data is kept confidential</h2>
+      <h2 id="about-title" data-i18n="aboutTitle">How this data is kept confidential</h2>
       <div class="about-grid" id="about"></div>
+    </section>
+
+    <section class="card about" id="accessibility" aria-labelledby="a11y-title" tabindex="-1">
+      <h2 id="a11y-title" data-i18n="a11yTitle">Accessibility</h2>
+      <p id="a11y-text" data-i18n="a11yText"></p>
+      <p id="a11y-feedback"></p>
     </section>
   </main>
 
   <footer class="wrap site-footer">
     <p id="footer-meta"></p>
+    <p><a href="#accessibility" data-i18n="a11yLink">Accessibility</a></p>
   </footer>
 
-  <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
-  <div class="toast" id="toast" role="status" hidden></div>
+  <!-- Status messages for screen readers (filters changed, link copied…) -->
+  <div class="sr-only" id="status" role="status" aria-live="polite" aria-atomic="true"></div>
+  <!-- Visual-only tooltip: its content is already in each mark's accessible name and the Table view -->
+  <div class="tooltip" id="tooltip" aria-hidden="true" hidden></div>
+  <div class="toast" id="toast" aria-hidden="true" hidden></div>
 
   <script type="module" src="app.js"></script>
 </body>

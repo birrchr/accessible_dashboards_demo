@@ -1,22 +1,57 @@
 // Survey dashboard — vanilla JS, no runtime dependencies, no build step.
 // Loads ONE pre-aggregated, disclosure-controlled file (data/aggregates.json) and renders it.
 //
-// Sections:  helpers · tooltip · data access · URL state · controls · tiles · dot plot ·
-//            table + CSV · heatmap · about · orchestration
-// Most changes (indicators, groups, wording) belong in config/survey.toml, not here.
-// See docs/CUSTOMIZING.md → "Changing the website".
+// Sections:  i18n · helpers · status & tooltip · data access · URL state · filters (incl. the
+//            mobile modal sheet) · tiles · dot plot · table + CSV · heatmap · about · orchestration
+//
+// Accessibility notes (see docs/ACCESSIBILITY.md):
+//   • Every visual has a text equivalent: chart rows carry full accessible names, the Table view
+//     repeats the chart, heatmap cells carry screen-reader text for better/worse/suppressed.
+//   • Re-renders keep keyboard focus where it was (see data-fk + restoreFocus).
+//   • Changes are announced through one polite live region (#status), not by re-reading content.
+//
+// Most changes (indicators, groups, wording) belong in config/survey.toml, interface text in i18n.js.
+
+import { STRINGS, LOCALES, NATIVE_NAMES } from "./i18n.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const SVGNS = "http://www.w3.org/2000/svg";
-let LOCALE = "en-CA";
-const fmt1 = (v) => v.toLocaleString(LOCALE, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-const fmtN = (v) => v.toLocaleString(LOCALE);
 
-const state = { ind: null, by: null, slice: "all", sort: "natural", view: "chart" };
-let DEFAULTS;
-let DATA, META, IND, DIM;
+const state = { lang: "en", ind: null, by: null, slice: "all", sort: "natural", view: "chart" };
+let DEFAULTS, DATA, META, IND, DIM;
+let activeRow = null; // level shown as the focusable row in the dot chart (roving tabindex)
 const FRAMED = (() => { try { return window.top !== window.self; } catch { return true; } })();
+const mobileMQ = matchMedia("(max-width: 720px)");
+
+// ── i18n ────────────────────────────────────────────────────────────────────
+function t(key, vars = {}) {
+  let s = STRINGS[state.lang]?.[key] ?? STRINGS.en[key] ?? key;
+  if (typeof s !== "string") return s;
+  return typo(s.replace(/\{(\w+)\}/g, (_, k) => (vars[k] ?? "")));
+}
+// French typography: non-breaking spaces before : ; % $ and inside numbers (30 000 $),
+// so values never wrap mid-number.
+function typo(s) {
+  if (state.lang !== "fr" || typeof s !== "string") return s;
+  return s.replace(/ ([:;%$])/g, "\u00a0$1").replace(/(\d) (?=\d{3}\b)/g, "$1\u00a0");
+}
+const L = (obj) => typo(obj && typeof obj === "object" ? obj[state.lang] ?? obj[META.site.default_language] ?? "" : obj ?? "");
+const locale = () => LOCALES[state.lang] || "en-CA";
+const fmt1 = (v) => v.toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const fmtN = (v) => v.toLocaleString(locale());
+const pct = (v) => t("pct", { v: fmt1(v) });
+const signed = (d) => `${d >= 0 ? "+" : "−"}${fmt1(Math.abs(d))}`;
+const levelLabel = (dim, value) => L(DIM[dim].level_labels?.[value]) || value;
+const dimLabel = (dim) => L(DIM[dim].label);
+const indLabel = (id, k = "label") => L(IND[id][k]);
+
+function sliceLabel(key) {
+  if (key === "all") return t("allRespondents");
+  const [d, v] = splitSlice(key);
+  return t("sliceFmt", { dim: dimLabel(d), level: levelLabel(d, v) });
+}
+const splitSlice = (key) => { const i = key.indexOf("="); return [key.slice(0, i), key.slice(i + 1)]; };
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 function el(tag, attrs = {}, ...children) {
@@ -26,37 +61,30 @@ function el(tag, attrs = {}, ...children) {
     if (k === "class") node.setAttribute("class", v);
     else if (k === "text") node.textContent = v;
     else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
-    else node.setAttribute(k, v);
+    else node.setAttribute(k, v === true ? "" : v);
   }
-  for (const c of children.flat()) if (c != null) node.append(c instanceof Node ? c : document.createTextNode(c));
+  for (const c of children.flat(Infinity)) if (c != null && c !== false) node.append(c instanceof Node ? c : document.createTextNode(c));
   return node;
 }
 const svg = (tag, attrs, ...kids) => el("svg:" + tag, attrs, ...kids);
-
-function sliceLabel(key, { short = false } = {}) {
-  if (key === "all") return "All respondents";
-  const [d, v] = key.split("=");
-  return short ? v : `${DIM[d].label}: ${v}`;
-}
+const srOnly = (text) => el("span", { class: "sr-only", text });
 
 function measure(text, font = "13.5px system-ui, -apple-system, 'Segoe UI', sans-serif") {
   const ctx = (measure.ctx ||= document.createElement("canvas").getContext("2d"));
   ctx.font = font;
   return ctx.measureText(text).width;
 }
-
 function wrapLabel(text, maxW) {
   if (measure(text) <= maxW) return [text];
   const words = text.split(" ");
-  let line = "";
   const lines = [];
+  let line = "";
   for (const w of words) {
-    const t = line ? `${line} ${w}` : w;
-    if (measure(t) > maxW && line) { lines.push(line); line = w; } else line = t;
+    const tt = line ? `${line} ${w}` : w;
+    if (measure(tt) > maxW && line) { lines.push(line); line = w; } else line = tt;
   }
   lines.push(line);
-  if (lines.length > 2) return [lines[0], lines.slice(1).join(" ")];
-  return lines;
+  return lines.length > 3 ? [lines[0], lines[1], lines.slice(2).join(" ")] : lines;
 }
 
 function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
@@ -69,36 +97,68 @@ function lum(hex) {
 const contrast = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
 const inkOn = (bg) => (contrast(bg, "#ffffff") >= contrast(bg, "#0b0b0b") ? "#ffffff" : "#0b0b0b");
 
-function toast(msg) {
-  const t = $("#toast");
-  t.textContent = msg; t.hidden = false;
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => (t.hidden = true), 2200);
+// Keep focus on "the same thing" across re-renders: elements carry data-fk keys.
+function focusKey() { return document.activeElement?.closest?.("[data-fk]")?.dataset.fk || null; }
+function restoreFocus(key) {
+  if (!key) return;
+  const target = document.querySelector(`[data-fk="${CSS.escape(key)}"]`);
+  if (target && target !== document.activeElement) target.focus({ preventScroll: true });
 }
 
-// ── Tooltip (hover, keyboard focus, and tap) ────────────────────────────────
+// ── Status (screen readers) & visual toast ──────────────────────────────────
+function announce(msg) {
+  clearTimeout(announce.timer);
+  announce.timer = setTimeout(() => {
+    const s = $("#status");
+    s.textContent = "";
+    requestAnimationFrame(() => (s.textContent = msg));
+  }, 350);
+}
+function toast(msg) {
+  const tt = $("#toast");
+  tt.textContent = msg; tt.hidden = false;
+  announce(msg);
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => (tt.hidden = true), 4000);
+}
+
+// ── Tooltip ─────────────────────────────────────────────────────────────────
+// Visual enhancement only: everything it shows is also in the mark's accessible name and
+// in the Table view. Meets WCAG 1.4.13: dismissible (Esc), hoverable, persistent.
 const tip = () => $("#tooltip");
+let tipOwner = null, tipHideTimer = null;
 function showTip(target, build) {
-  const t = tip();
-  t.replaceChildren(...build());
-  t.hidden = false;
+  clearTimeout(tipHideTimer);
+  const tt = tip();
+  tt.replaceChildren(...build());
+  tt.hidden = false;
+  tipOwner = target;
   const r = target.getBoundingClientRect();
-  const tw = t.offsetWidth, th = t.offsetHeight;
-  let x = Math.min(window.innerWidth - tw - 8, Math.max(8, r.left + r.width / 2 - tw / 2));
+  const tw = tt.offsetWidth, th = tt.offsetHeight;
+  const x = Math.min(window.innerWidth - tw - 8, Math.max(8, r.left + r.width / 2 - tw / 2));
   let y = r.top - th - 8;
   if (y < 8) y = r.bottom + 8;
-  t.style.left = `${x}px`; t.style.top = `${y}px`;
+  tt.style.left = `${x}px`; tt.style.top = `${y}px`;
 }
-function hideTip() { tip().hidden = true; }
+function hideTip(now = false) {
+  clearTimeout(tipHideTimer);
+  const go = () => { tip().hidden = true; tipOwner = null; };
+  if (now) go(); else tipHideTimer = setTimeout(go, 250);
+}
 function bindTip(node, build) {
   node.addEventListener("pointerenter", () => showTip(node, build));
-  node.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") hideTip(); });
-  node.addEventListener("pointerdown", (e) => { if (e.pointerType !== "mouse") { e.stopPropagation(); showTip(node, build); } });
+  node.addEventListener("pointerleave", () => hideTip());
   node.addEventListener("focus", () => showTip(node, build));
-  node.addEventListener("blur", hideTip);
+  node.addEventListener("blur", () => hideTip(true));
 }
-document.addEventListener("pointerdown", hideTip);
-window.addEventListener("scroll", hideTip, { passive: true });
+function initTooltip() {
+  const tt = tip();
+  tt.addEventListener("pointerenter", () => clearTimeout(tipHideTimer));
+  tt.addEventListener("pointerleave", () => hideTip());
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !tt.hidden) { hideTip(true); e.stopPropagation(); } }, true);
+  document.addEventListener("pointerdown", (e) => { if (!tt.contains(e.target) && !tipOwner?.contains(e.target)) hideTip(true); });
+  window.addEventListener("scroll", () => hideTip(true), { passive: true });
+}
 
 // ── Data access ─────────────────────────────────────────────────────────────
 function currentRows() {
@@ -106,8 +166,8 @@ function currentRows() {
   return rows.map((r) => {
     const est = r.est ? r.est[state.ind] : null;
     return {
-      level: r.level, n: r.n, est,
-      reason: r.n == null ? "Too few respondents to publish" : est == null ? "Estimate too unreliable to publish" : null,
+      level: r.level, label: levelLabel(state.by, r.level), n: r.n, est,
+      reason: r.n == null ? t("reasonSmall") : est == null ? t("reasonUnreliable") : null,
     };
   });
 }
@@ -115,10 +175,26 @@ function sliceEst(ind = state.ind) {
   const s = DATA.slices[state.slice];
   return s && s.est ? s.est[ind] : null;
 }
+function sortedRows() {
+  const rows = currentRows();
+  if (state.sort !== "value") return rows;
+  return [...rows].sort((a, b) => (b.est ? b.est[0] : -1) - (a.est ? a.est[0] : -1));
+}
 
 // ── URL state ───────────────────────────────────────────────────────────────
+function pickLanguage(p) {
+  const langs = META.site.languages;
+  const fromUrl = p.get("lang");
+  if (langs.includes(fromUrl)) return fromUrl;
+  let saved = null;
+  try { saved = localStorage.getItem("lang"); } catch { /* storage unavailable */ }
+  if (langs.includes(saved)) return saved;
+  const nav = (navigator.languages || [navigator.language]).map((x) => (x || "").slice(0, 2).toLowerCase());
+  return nav.find((x) => langs.includes(x)) || META.site.default_language;
+}
 function readURL() {
   const p = new URLSearchParams(location.search);
+  state.lang = pickLanguage(p);
   if (IND[p.get("i")]) state.ind = p.get("i");
   if (DIM[p.get("by")]) state.by = p.get("by");
   const s = p.get("in");
@@ -126,83 +202,162 @@ function readURL() {
   if (p.get("sort") === "value") state.sort = "value";
   if (p.get("view") === "table") state.view = "table";
 }
+function urlFor(overrides = {}) {
+  const st = { ...state, ...overrides };
+  const p = new URLSearchParams({ lang: st.lang, i: st.ind, by: st.by });
+  if (st.slice !== "all") p.set("in", st.slice);
+  if (st.sort !== "natural") p.set("sort", st.sort);
+  if (st.view !== "chart") p.set("view", st.view);
+  return `${location.pathname}?${p}`;
+}
 function writeURL() {
-  const p = new URLSearchParams({ i: state.ind, by: state.by });
-  if (state.slice !== "all") p.set("in", state.slice);
-  if (state.sort !== "natural") p.set("sort", state.sort);
-  if (state.view !== "chart") p.set("view", state.view);
-  try { history.replaceState(null, "", `${location.pathname}?${p}`); } catch { /* sandboxed */ }
+  try { history.replaceState(null, "", urlFor()); } catch { /* sandboxed */ }
 }
 
-// ── Controls ────────────────────────────────────────────────────────────────
+// ── Static text & language switch ──────────────────────────────────────────
+function applyStaticText() {
+  document.documentElement.lang = state.lang;
+  document.title = L(META.site.title);
+  $$("[data-i18n]").forEach((n) => (n.textContent = t(n.dataset.i18n)));
+  $("#site-title").textContent = L(META.site.title);
+  $("#site-eyebrow").textContent = L(META.site.eyebrow);
+  $("#site-lede").textContent = L(META.site.lede);
+  $("#sort-group").setAttribute("aria-label", t("sortOrder"));
+  $("#view-group").setAttribute("aria-label", t("view"));
+  $("#download").textContent = FRAMED ? t("copyCsv") : t("downloadCsv");
+
+  // Language switch: link(s) to the other language(s), each marked with its own language.
+  const others = META.site.languages.filter((x) => x !== state.lang);
+  const btn = $("#lang-toggle");
+  if (others.length) {
+    const other = others[0];
+    btn.hidden = false;
+    btn.textContent = NATIVE_NAMES[other] || other.toUpperCase();
+    btn.lang = other;
+    btn.hreflang = other;
+    btn.href = urlFor({ lang: other });
+  }
+}
+function setLanguage(lang) {
+  state.lang = lang;
+  try { localStorage.setItem("lang", lang); } catch { /* ignore */ }
+  applyStaticText();
+  buildControls();
+  renderAbout();
+  update();
+}
+
+// ── Filters ─────────────────────────────────────────────────────────────────
 function buildControls() {
   const sel = $("#indicator");
-  const themes = [...new Set(META.indicators.map((i) => i.theme))];
+  sel.replaceChildren();
+  const themes = [...new Set(META.indicators.map((i) => L(i.theme)))];
   for (const th of themes) {
     const g = el("optgroup", { label: th });
-    for (const i of META.indicators.filter((x) => x.theme === th)) g.append(el("option", { value: i.id, text: i.label }));
+    for (const i of META.indicators.filter((x) => L(x.theme) === th)) g.append(el("option", { value: i.id, text: L(i.label) }));
     sel.append(g);
   }
-  sel.addEventListener("change", () => update({ ind: sel.value }));
 
   const chips = $("#compare");
-  for (const d of META.dimensions) {
-    chips.append(el("button", {
-      type: "button", class: "chip", role: "radio", "data-dim": d.id, text: d.label,
-      onclick: () => update({ by: d.id }),
-    }));
-  }
-  chips.addEventListener("keydown", (e) => {
-    if (!["ArrowRight", "ArrowLeft"].includes(e.key)) return;
+  chips.replaceChildren(...META.dimensions.map((d) => el("button", {
+    type: "button", class: "chip", role: "radio", "data-dim": d.id, "data-fk": `chip-${d.id}`, text: L(d.label),
+    onclick: () => update({ by: d.id }),
+  })));
+}
+
+function initControls() {
+  $("#indicator").addEventListener("change", (e) => update({ ind: e.target.value }));
+  $("#slice").addEventListener("change", (e) => update({ slice: e.target.value }));
+
+  // Radio group keyboard pattern (WAI-ARIA APG): arrows move and select, Home/End jump.
+  $("#compare").addEventListener("keydown", (e) => {
     const ids = META.dimensions.map((d) => d.id);
-    const i = ids.indexOf(state.by) + (e.key === "ArrowRight" ? 1 : -1);
-    update({ by: ids[(i + ids.length) % ids.length] });
-    $(`.chip[data-dim="${state.by}"]`).focus();
+    let i = ids.indexOf(state.by);
+    if (["ArrowRight", "ArrowDown"].includes(e.key)) i = (i + 1) % ids.length;
+    else if (["ArrowLeft", "ArrowUp"].includes(e.key)) i = (i - 1 + ids.length) % ids.length;
+    else if (e.key === "Home") i = 0;
+    else if (e.key === "End") i = ids.length - 1;
+    else return;
+    e.preventDefault();
+    update({ by: ids[i] });
+    $(`.chip[data-dim="${ids[i]}"]`).focus();
   });
 
-  $("#slice").addEventListener("change", (e) => update({ slice: e.target.value }));
   $("#reset").addEventListener("click", () => update({ ...DEFAULTS }));
   $("#share").addEventListener("click", async () => {
-    try { await navigator.clipboard.writeText(location.href); toast("Link copied — it opens this exact view"); }
-    catch { toast("Copy the page address to share this view"); }
+    try { await navigator.clipboard.writeText(location.href); toast(t("linkCopied")); }
+    catch { toast(t("linkCopyFail")); }
   });
+  if (FRAMED) $("#share").hidden = true;
 
   $$("[data-sort]").forEach((b) => b.addEventListener("click", () => update({ sort: b.dataset.sort })));
   $$("[data-view]").forEach((b) => b.addEventListener("click", () => update({ view: b.dataset.view })));
   $("#download").addEventListener("click", downloadCSV);
-  if (FRAMED) { $("#download").textContent = "Copy CSV"; $("#share").hidden = true; }
+  $("#lang-toggle").addEventListener("click", (e) => {
+    e.preventDefault();
+    const other = META.site.languages.find((x) => x !== state.lang);
+    setLanguage(other);
+    $("#lang-toggle").focus();
+  });
 
-  // Mobile sheet
+  // Small screens: filters open as a modal dialog (focus moves in, rest of page is inert,
+  // Escape closes, focus returns to the button that opened it).
+  const sheet = $("#controls");
+  const outside = () => [$(".site-header"), $("#summary-bar"), $("#main"), $(".site-footer"), $(".skip")];
   const open = () => {
-    $("#controls").classList.add("open"); $("#backdrop").hidden = false;
+    sheet.classList.add("open");
+    sheet.setAttribute("role", "dialog");
+    sheet.setAttribute("aria-modal", "true");
+    $("#backdrop").hidden = false;
     $("#open-filters").setAttribute("aria-expanded", "true");
-    setTimeout(() => $("#indicator").focus(), 50);
+    outside().forEach((n) => n && (n.inert = true));
+    setTimeout(() => $("#indicator").focus(), 60);
   };
-  const close = () => {
-    $("#controls").classList.remove("open"); $("#backdrop").hidden = true;
+  const close = (returnFocus = true) => {
+    if (!sheet.classList.contains("open")) return;
+    sheet.classList.remove("open");
+    sheet.removeAttribute("role");
+    sheet.removeAttribute("aria-modal");
+    $("#backdrop").hidden = true;
     $("#open-filters").setAttribute("aria-expanded", "false");
+    outside().forEach((n) => n && (n.inert = false));
+    if (returnFocus) $("#open-filters").focus();
   };
   $("#open-filters").addEventListener("click", open);
-  $("#close-filters").addEventListener("click", () => { close(); $("#open-filters").focus(); });
-  $("#apply-filters").addEventListener("click", () => { close(); $("#open-filters").focus(); });
-  $("#backdrop").addEventListener("click", close);
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+  $("#close-filters").addEventListener("click", () => close());
+  $("#apply-filters").addEventListener("click", () => close());
+  $("#backdrop").addEventListener("click", () => close());
+  sheet.addEventListener("keydown", (e) => {
+    if (!sheet.classList.contains("open")) return;
+    if (e.key === "Escape") { e.preventDefault(); close(); return; }
+    if (e.key !== "Tab") return;
+    // Keep Tab / Shift+Tab cycling inside the dialog.
+    const items = $$("button, select, a[href], [tabindex='0']", sheet).filter((n) => !n.disabled && n.offsetParent !== null);
+    const first = items[0], last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+  mobileMQ.addEventListener("change", () => close(false));
 }
 
 function syncControls() {
   $("#indicator").value = state.ind;
-  $$(".chip").forEach((c) => c.setAttribute("aria-checked", String(c.dataset.dim === state.by)));
-  $$(".chip").forEach((c) => (c.tabIndex = c.dataset.dim === state.by ? 0 : -1));
+  $$(".chip").forEach((c) => {
+    const on = c.dataset.dim === state.by;
+    c.setAttribute("aria-checked", String(on));
+    c.tabIndex = on ? 0 : -1;
+  });
 
   const s = $("#slice");
-  s.replaceChildren(el("option", { value: "all", text: "All respondents" }));
+  s.replaceChildren(el("option", { value: "all", text: t("allRespondents") }));
   for (const d of META.dimensions) {
     if (d.id === state.by) continue;
-    const g = el("optgroup", { label: d.label });
+    const g = el("optgroup", { label: L(d.label) });
     for (const lvl of d.levels) {
       const key = `${d.id}=${lvl}`;
       const ok = DATA.slices[key] && DATA.slices[key].n != null;
-      g.append(el("option", { value: key, disabled: !ok, text: ok ? lvl : `${lvl} (too few to show)` }));
+      const name = levelLabel(d.id, lvl);
+      g.append(el("option", { value: key, disabled: !ok, text: ok ? name : t("tooFew", { level: name }) }));
     }
     s.append(g);
   }
@@ -211,79 +366,80 @@ function syncControls() {
   $$("[data-sort]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.sort === state.sort)));
   $$("[data-view]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.view === state.view)));
 
-  const st = $("#summary-text");
-  st.replaceChildren(el("b", { text: IND[state.ind].short }), el("span", { text: `by ${DIM[state.by].label.toLowerCase()} · ${sliceLabel(state.slice)}` }));
+  $("#summary-text").replaceChildren(
+    el("b", { text: indLabel(state.ind, "short") }),
+    el("span", { text: `${dimLabel(state.by)} · ${sliceLabel(state.slice)}` }),
+  );
 }
 
 // ── Tiles ───────────────────────────────────────────────────────────────────
+function valueNode(v, flag) {
+  const [, num, suffix] = pct(v).match(/^(.*?)(\s?%)$/) || [null, pct(v), ""];
+  return [num, el("small", { text: suffix }), flag === "E" ? [el("span", { class: "flag", "aria-hidden": "true", text: "E" }), srOnly(` (${t("srCaution")})`)] : null];
+}
 function renderTiles() {
-  const ind = IND[state.ind];
   const est = sliceEst();
   const all = DATA.slices.all.est[state.ind];
-  const rows = currentRows().filter((r) => r.est);
-  const hidden = currentRows().length - rows.length;
+  const rows = currentRows();
+  const shown = rows.filter((r) => r.est);
+  const hidden = rows.length - shown.length;
   const tiles = [];
 
-  const heroNote = [];
-  if (est) heroNote.push(`95% CI ${fmt1(est[1])}–${fmt1(est[2])}`);
-  if (state.slice !== "all" && est && all) {
-    const d = est[0] - all[0];
-    heroNote.push(`${d >= 0 ? "+" : "−"}${fmt1(Math.abs(d))} pts vs all respondents`);
-  }
+  const note = [];
+  if (est) note.push(t("ci", { lo: fmt1(est[1]), hi: fmt1(est[2]) }));
+  if (state.slice !== "all" && est && all) note.push(t("vsAll", { diff: signed(est[0] - all[0]) }));
   tiles.push(el("div", { class: "tile hero" },
-    el("p", { class: "tile-label", text: `${ind.short} · ${sliceLabel(state.slice)}` }),
-    el("p", { class: "tile-value" }, est ? fmt1(est[0]) : "x", est ? el("small", { text: "%" }) : null, est && est[3] === "E" ? el("span", { class: "flag", text: "E" }) : null),
-    el("p", { class: "tile-note", text: est ? heroNote.join(" · ") : "Suppressed for confidentiality" }),
+    el("p", { class: "tile-label", text: `${indLabel(state.ind, "short")} · ${sliceLabel(state.slice)}` }),
+    el("p", { class: "tile-value" }, est ? valueNode(est[0], est[3]) : [el("span", { "aria-hidden": "true", text: "x" }), srOnly(t("srSuppressed"))]),
+    el("p", { class: "tile-note", text: est ? note.join(" · ") : t("suppressedForConf") }),
   ));
 
-  if (rows.length) {
-    const sorted = [...rows].sort((a, b) => b.est[0] - a.est[0]);
-    const [hi, lo] = [sorted[0], sorted[sorted.length - 1]];
-    for (const r of [hi, lo]) {
+  if (shown.length) {
+    const sorted = [...shown].sort((a, b) => b.est[0] - a.est[0]);
+    for (const [r, key] of [[sorted[0], "highest"], [sorted[sorted.length - 1], "lowest"]]) {
       tiles.push(el("div", { class: "tile" },
-        el("p", { class: "tile-label", text: `${r === hi ? "Highest" : "Lowest"} ${DIM[state.by].label.toLowerCase()}` }),
-        el("p", { class: "tile-value" }, fmt1(r.est[0]), el("small", { text: "%" })),
-        el("p", { class: "tile-note", text: r.level }),
+        el("p", { class: "tile-label", text: t(key) }),
+        el("p", { class: "tile-value" }, valueNode(r.est[0], r.est[3])),
+        el("p", { class: "tile-note", text: r.label }),
       ));
     }
   }
   const n = DATA.slices[state.slice].n;
   tiles.push(el("div", { class: "tile" },
-    el("p", { class: "tile-label", text: "Respondents in view" }),
+    el("p", { class: "tile-label", text: t("respondentsInView") }),
     el("p", { class: "tile-value", text: n != null ? fmtN(n) : "x" }),
-    el("p", { class: "tile-note", text: hidden ? `${hidden} group${hidden > 1 ? "s" : ""} not shown (privacy or reliability)` : "Counts rounded to nearest 5" }),
+    el("p", { class: "tile-note", text: hidden ? (hidden === 1 ? t("hiddenOne") : t("hiddenMany", { n: hidden })) : t("countsRounded") }),
   ));
   $("#tiles").replaceChildren(...tiles);
 }
 
-// ── Dot plot with CIs ───────────────────────────────────────────────────────
-function sortedRows() {
-  const rows = currentRows();
-  if (state.sort === "value") {
-    return [...rows].sort((a, b) => (b.est ? b.est[0] : -1) - (a.est ? a.est[0] : -1));
-  }
-  return rows;
+// ── Dot plot with confidence intervals ──────────────────────────────────────
+function rowName(r, ref) {
+  if (!r.est) return t("rowSuppressed", { level: r.label, reason: r.reason });
+  const [p, lo, hi, q] = r.est;
+  const diff = ref ? t(state.slice === "all" ? "diffAll" : "diffGroup", { diff: signed(p - ref[0]) }) : "";
+  return t("rowLabel", { level: r.label, p: pct(p), lo: fmt1(lo), hi: fmt1(hi), caution: q === "E" ? t("caution") : "", diff });
 }
 
 function renderDot() {
-  const ind = IND[state.ind];
-  $("#dot-title").textContent = `${ind.label}, by ${DIM[state.by].label.toLowerCase()}`;
-  $("#dot-sub").textContent = `${sliceLabel(state.slice)} · weighted % with 95% confidence interval`;
+  $("#dot-title").textContent = indLabel(state.ind);
+  $("#dot-sub").textContent = t("comparedBy", { dim: dimLabel(state.by), slice: sliceLabel(state.slice) });
 
   const host = $("#dot-chart");
   const card = host.parentElement, cs = getComputedStyle(card);
-  const W = Math.max(280, card.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight));
+  const W = Math.max(240, card.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight));
   const mobile = W < 560;
   const rows = sortedRows();
   const ref = sliceEst();
+  if (!rows.some((r) => r.level === activeRow)) activeRow = rows[0]?.level;
 
-  const valW = 52;
-  const labelMax = Math.min(mobile ? W * 0.36 : 190, Math.max(...rows.map((r) => measure(r.level))) + 4);
+  const valW = state.lang === "fr" ? 64 : 56;
+  const labelMax = Math.min(mobile ? W * 0.36 : 210, Math.max(...rows.map((r) => measure(r.label))) + 4);
   const labelW = labelMax + 12;
   const x0 = labelW, x1 = W - valW - 10;
-  const top = 30, rowH = mobile ? 42 : 36;
-  const wrapped = rows.map((r) => wrapLabel(r.level, labelMax));
-  const heights = wrapped.map((l) => (l.length > 1 ? Math.max(rowH, 44) : rowH));
+  const top = 30, rowH = mobile ? 44 : 36;
+  const wrapped = rows.map((r) => wrapLabel(r.label, labelMax));
+  const heights = wrapped.map((l) => Math.max(rowH, 16 * l.length + 14));
   const plotBottom = top + heights.reduce((a, b) => a + b, 0) + 4;
   const H = plotBottom + 22;
 
@@ -293,29 +449,35 @@ function renderDot() {
   // Dot plots encode position, not length, so the axis may start above zero to use the width.
   const niceMin = Math.max(0, Math.floor((minV - 2) / 10) * 10);
   const sx = (v) => x0 + ((v - niceMin) / (niceMax - niceMin)) * (x1 - x0);
-  const step = [5, 10, 20, 25, 50].find((s) => ((x1 - x0) * s) / (niceMax - niceMin) >= 40) || 50;
+  const step = [5, 10, 20, 25, 50].find((s) => ((x1 - x0) * s) / (niceMax - niceMin) >= 44) || 50;
 
-  const root = svg("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "group", "aria-label": `${ind.label} by ${DIM[state.by].label}` });
-  const defs = svg("defs", {},
+  const root = svg("svg", {
+    viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "group",
+    "aria-label": t("chartLabel", { indicator: indLabel(state.ind), dim: dimLabel(state.by) }),
+    "aria-describedby": "chart-help",
+  });
+  root.append(svg("defs", {},
     svg("pattern", { id: "supp-pattern", width: 6, height: 6, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" },
       svg("rect", { width: 6, height: 6, fill: "var(--surface-2)" }),
-      svg("line", { x1: 0, y1: 0, x2: 0, y2: 6, stroke: "var(--grid)", "stroke-width": 2 })));
-  root.append(defs);
+      svg("line", { x1: 0, y1: 0, x2: 0, y2: 6, stroke: "var(--grid)", "stroke-width": 2 }))));
 
-  // grid + ticks
+  const axis = svg("g", { "aria-hidden": "true" });
   for (let v = Math.ceil(niceMin / step) * step; v <= niceMax; v += step) {
-    root.append(svg("line", { class: "gridline", x1: sx(v), x2: sx(v), y1: top - 6, y2: plotBottom }));
-    root.append(svg("text", { class: "tick", x: sx(v), y: top - 12, "text-anchor": "middle", text: `${v}%` }));
+    axis.append(svg("line", { class: "gridline", x1: sx(v), x2: sx(v), y1: top - 6, y2: plotBottom }));
+    axis.append(svg("text", { class: "tick", x: sx(v), y: top - 12, "text-anchor": "middle", text: t("pct", { v: v.toLocaleString(locale()) }) }));
   }
+  root.append(axis);
 
   let y = top;
   rows.forEach((r, i) => {
     const h = heights[i], cy = y + h / 2;
-    const g = svg("g", { class: "row", tabindex: 0, role: "img",
-      "aria-label": r.est ? `${r.level}: ${fmt1(r.est[0])}%, 95% confidence interval ${fmt1(r.est[1])} to ${fmt1(r.est[2])}${r.est[3] === "E" ? ", use with caution" : ""}` : `${r.level}: suppressed. ${r.reason}` });
+    const g = svg("g", {
+      class: "row", role: "img", tabindex: r.level === activeRow ? 0 : -1,
+      "aria-label": rowName(r, ref), "data-level": r.level, "data-fk": `row-${r.level}`,
+    });
     g.append(svg("rect", { class: "row-bg", x: 0, y, width: W, height: h, rx: 6 }));
     const lines = wrapped[i];
-    const lt = svg("text", { class: `lbl${r.est ? "" : " muted"}`, x: 4, y: cy - (lines.length - 1) * 8 + 4.5 });
+    const lt = svg("text", { class: `lbl${r.est ? "" : " muted"}`, x: 4, y: cy - (lines.length - 1) * 8 + 4.5, "aria-hidden": "true" });
     lines.forEach((ln, k) => lt.append(svg("tspan", { x: 4, dy: k ? 16 : 0, text: ln })));
     g.append(lt);
 
@@ -328,93 +490,114 @@ function renderDot() {
       g.append(vt);
     } else {
       g.append(svg("rect", { class: "supp-band", x: x0, y: cy - 9, width: x1 - x0, height: 18, rx: 4 }));
-      g.append(svg("text", { class: "tick", x: x0 + 8, y: cy + 4, text: mobile ? "Suppressed" : `Suppressed · ${r.reason.toLowerCase()}` }));
+      g.append(svg("text", { class: "tick", x: x0 + 8, y: cy + 4, text: mobile ? t("suppressed") : `${t("suppressed")} · ${r.reason}` }));
       g.append(svg("text", { class: "val muted", x: W - 4, y: cy + 4.5, "text-anchor": "end", text: "x" }));
     }
     g.append(svg("rect", { class: "row-hit", x: 0, y, width: W, height: h }));
+    g.addEventListener("focus", () => { activeRow = r.level; $$(".row", root).forEach((o) => (o.tabIndex = o === g ? 0 : -1)); });
     bindTip(g, () => tipContent(r, ref));
     root.append(g);
     y += h;
   });
 
-  // reference line on top
   if (ref) {
     const rx = sx(ref[0]);
-    root.append(svg("line", { class: "refline", x1: rx, x2: rx, y1: top - 6, y2: plotBottom + 4 }));
-    const label = state.slice === "all" ? `All ${fmt1(ref[0])}` : `Overall ${fmt1(ref[0])}`;
+    const label = t(state.slice === "all" ? "refAll" : "refGroup", { v: fmt1(ref[0]) });
     const lw = measure(label, "600 11.5px system-ui");
     const anchorEnd = rx + lw + 6 > x1;
-    root.append(svg("text", { class: "reflabel", x: anchorEnd ? rx - 5 : rx + 5, y: plotBottom + 16, "text-anchor": anchorEnd ? "end" : "start", text: label }));
+    root.append(svg("g", { "aria-hidden": "true" },
+      svg("line", { class: "refline", x1: rx, x2: rx, y1: top - 6, y2: plotBottom + 4 }),
+      svg("text", { class: "reflabel", x: anchorEnd ? rx - 5 : rx + 5, y: plotBottom + 16, "text-anchor": anchorEnd ? "end" : "start", text: label })));
   }
+
+  // Roving focus between rows (one Tab stop for the whole chart).
+  root.addEventListener("keydown", (e) => {
+    const all = $$(".row", root);
+    const i = all.indexOf(document.activeElement);
+    if (i < 0) return;
+    let j = i;
+    if (e.key === "ArrowDown" || e.key === "ArrowRight") j = Math.min(all.length - 1, i + 1);
+    else if (e.key === "ArrowUp" || e.key === "ArrowLeft") j = Math.max(0, i - 1);
+    else if (e.key === "Home") j = 0;
+    else if (e.key === "End") j = all.length - 1;
+    else return;
+    e.preventDefault();
+    all[j].focus();
+  });
 
   host.replaceChildren(root);
   host.hidden = state.view !== "chart";
 
-  const key = $("#dot-key");
-  key.replaceChildren(
-    el("span", {}, el("i", { class: "k-dot" }), "Estimate"),
-    el("span", {}, el("i", { class: "k-ci" }), "95% CI"),
-    el("span", {}, el("i", { class: "k-ref" }), state.slice === "all" ? "All respondents" : "Overall for this group"),
-    el("span", { text: "E = use with caution · x = suppressed" }),
+  $("#dot-key").replaceChildren(
+    el("span", {}, el("i", { class: "k-dot", "aria-hidden": "true" }), t("keyEstimate")),
+    el("span", {}, el("i", { class: "k-ci", "aria-hidden": "true" }), t("keyCI")),
+    el("span", {}, el("i", { class: "k-ref", "aria-hidden": "true" }), t(state.slice === "all" ? "keyRefAll" : "keyRefGroup")),
+    el("span", { text: t("keyFlags") }),
   );
 }
 
 function tipContent(r, ref) {
-  const out = [el("div", { class: "tt-name", text: r.level })];
+  const out = [el("div", { class: "tt-name", text: r.label })];
   if (!r.est) {
-    out.push(el("div", { class: "tt-val", text: "Suppressed" }), el("div", { class: "tt-row", text: r.reason }));
+    out.push(el("div", { class: "tt-val", text: t("suppressed") }), el("div", { class: "tt-row", text: r.reason }));
     return out;
   }
   const [p, lo, hi, q] = r.est;
-  out.push(el("div", { class: "tt-val", text: `${fmt1(p)}%` }));
-  out.push(el("div", { class: "tt-row", text: `95% CI ${fmt1(lo)}–${fmt1(hi)}` }));
-  if (ref) {
-    const d = p - ref[0];
-    out.push(el("div", { class: "tt-row", text: `${d >= 0 ? "+" : "−"}${fmt1(Math.abs(d))} pts vs ${state.slice === "all" ? "all respondents" : "group overall"}` }));
-  }
-  out.push(el("div", { class: "tt-row", text: `≈ ${fmtN(r.n)} respondents` }));
-  if (q === "E") out.push(el("div", { class: "tt-row", text: "E: high sampling variability — use with caution" }));
+  out.push(el("div", { class: "tt-val", text: pct(p) }));
+  out.push(el("div", { class: "tt-row", text: t("ci", { lo: fmt1(lo), hi: fmt1(hi) }) }));
+  if (ref) out.push(el("div", { class: "tt-row", text: t(state.slice === "all" ? "vsAll" : "vsGroup", { diff: signed(p - ref[0]) }) }));
+  out.push(el("div", { class: "tt-row", text: t("approxRespondents", { n: fmtN(r.n) }) }));
+  if (q === "E") out.push(el("div", { class: "tt-row", text: t("eFlagTip") }));
   return out;
 }
 
-// ── Table view ──────────────────────────────────────────────────────────────
+// ── Table view & CSV ────────────────────────────────────────────────────────
+function cellValue(est) {
+  if (!est) return [el("span", { "aria-hidden": "true", text: "x" }), srOnly(t("srSuppressed"))];
+  return [fmt1(est[0]), est[3] === "E" ? [el("span", { class: "flag", "aria-hidden": "true", text: "E" }), srOnly(` (${t("srCaution")})`)] : null];
+}
 function renderTable() {
   const host = $("#dot-table");
   host.hidden = state.view !== "table";
   if (host.hidden) return;
   const rows = sortedRows();
-  const t = el("table", {},
-    el("caption", { class: "muted", style: "text-align:left;caption-side:bottom;padding-top:8px;font-size:12.5px", text: "Counts rounded to the nearest 5. x = suppressed. E = use with caution." }),
-    el("thead", {}, el("tr", {},
-      el("th", { scope: "col", text: DIM[state.by].label }),
-      el("th", { scope: "col", class: "num", text: "Estimate (%)" }),
-      el("th", { scope: "col", class: "num", text: "95% CI" }),
-      el("th", { scope: "col", class: "num", text: "Respondents" }))),
-    el("tbody", {}, rows.map((r) => el("tr", {},
-      el("th", { scope: "row", text: r.level }),
-      el("td", { class: "num" }, r.est ? fmt1(r.est[0]) : "x", r.est && r.est[3] === "E" ? el("span", { class: "flag", text: "E" }) : null),
-      el("td", { class: "num", text: r.est ? `${fmt1(r.est[1])}–${fmt1(r.est[2])}` : "" }),
-      el("td", { class: "num", text: r.n != null ? fmtN(r.n) : "x" })))));
-  host.replaceChildren(t);
+  const caption = t("tableCaption", { indicator: indLabel(state.ind), dim: dimLabel(state.by), slice: sliceLabel(state.slice) });
+  host.setAttribute("role", "region");
+  host.setAttribute("tabindex", "0");
+  host.setAttribute("aria-label", t("scrollRegion", { name: caption }));
+  host.replaceChildren(
+    el("table", {},
+      el("caption", { class: "sr-only", text: caption }),
+      el("thead", {}, el("tr", {},
+        el("th", { scope: "col", text: dimLabel(state.by) }),
+        el("th", { scope: "col", class: "num", text: t("colEstimate") }),
+        el("th", { scope: "col", class: "num", text: t("colCI") }),
+        el("th", { scope: "col", class: "num", text: t("colRespondents") }))),
+      el("tbody", {}, rows.map((r) => el("tr", {},
+        el("th", { scope: "row", text: r.label }),
+        el("td", { class: "num" }, cellValue(r.est)),
+        el("td", { class: "num", text: r.est ? `${fmt1(r.est[1])}–${fmt1(r.est[2])}` : "" }),
+        el("td", { class: "num" }, r.n != null ? fmtN(r.n) : [el("span", { "aria-hidden": "true", text: "x" }), srOnly(t("srSuppressed"))]))))),
+    el("p", { class: "key", text: t("tableNote") }),
+  );
 }
 
 function downloadCSV() {
+  // Machine-friendly: "." decimals and "," separators in every language; labels are localized.
   const esc = (v) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
-  const head = ["indicator", "compare_by", "group", "narrowed_to", "estimate_pct", "ci_low", "ci_high", "quality", "respondents_rounded"];
-  const lines = [head.join(",")];
+  const lines = [t("csvHeaders").join(",")];
   for (const r of sortedRows()) {
-    lines.push([IND[state.ind].label, DIM[state.by].label, r.level, sliceLabel(state.slice),
-      r.est ? r.est[0] : "x", r.est ? r.est[1] : "", r.est ? r.est[2] : "", r.est ? r.est[3] : "suppressed", r.n ?? "x"].map(esc).join(","));
+    lines.push([indLabel(state.ind), dimLabel(state.by), r.label, sliceLabel(state.slice),
+      r.est ? r.est[0] : "x", r.est ? r.est[1] : "", r.est ? r.est[2] : "", r.est ? r.est[3] : t("csvSuppressed"), r.n ?? "x"].map(esc).join(","));
   }
+  const text = "﻿" + lines.join("\n"); // BOM so Excel reads accents correctly
   if (FRAMED) {
-    // Embedded/sandboxed hosts block downloads: copy instead.
-    navigator.clipboard.writeText(lines.join("\n"))
-      .then(() => toast("CSV copied — paste into Excel or a text file"))
-      .catch(() => toast("Couldn’t copy — try the Table view"));
+    navigator.clipboard.writeText(lines.join("\n")).then(() => toast(t("csvCopied")), () => toast(t("csvCopyFail")));
     return;
   }
-  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
-  const a = el("a", { href: URL.createObjectURL(blob), download: `${state.ind}_by_${state.by}${state.slice === "all" ? "" : "_" + state.slice.replace(/[^A-Za-z0-9]+/g, "-")}.csv` });
+  const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
+  const name = `${state.ind}_${state.by}${state.slice === "all" ? "" : "_" + state.slice.replace(/[^A-Za-z0-9]+/g, "-")}_${state.lang}.csv`;
+  const a = el("a", { href: URL.createObjectURL(blob), download: name });
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
@@ -424,103 +607,123 @@ const BINS = [2, 5, 10];
 function binFor(diff) {
   const a = Math.abs(diff);
   const k = a < BINS[0] ? 0 : a < BINS[1] ? 1 : a < BINS[2] ? 2 : 3;
-  return k === 0 ? "--div-0" : `--div-${diff > 0 ? "b" : "r"}${k}`;
+  return { k, dir: k === 0 ? 0 : diff > 0 ? 1 : -1, token: k === 0 ? "--div-0" : `--div-${diff > 0 ? "b" : "r"}${k}` };
 }
 
 function renderHeatmap() {
-  $("#heat-sub").textContent = `${DIM[state.by].label} · ${sliceLabel(state.slice)} · weighted %`;
-  const legend = $("#heat-legend");
-  const sw = (v) => el("span", { class: "sw", style: `background:var(${v})` });
-  legend.replaceChildren(
-    el("span", { text: "Worse" }),
-    el("span", { class: "swatches" }, sw("--div-r3"), sw("--div-r2"), sw("--div-r1"), sw("--div-0"), sw("--div-b1"), sw("--div-b2"), sw("--div-b3")),
-    el("span", { text: "Better than overall" }),
-    el("span", { class: "muted", text: "(±2, 5, 10 pts)" }),
-    el("span", { class: "sw-s" }), el("span", { text: "Suppressed" }),
+  $("#heat-sub").textContent = t("heatSub", { dim: dimLabel(state.by), slice: sliceLabel(state.slice) });
+  const sw = (v, glyph) => el("span", { class: "sw", style: `background:var(${v});color:${inkOn(cssVar(v))}` }, glyph || "");
+  $("#heat-legend").replaceChildren(
+    el("span", { class: "legend-scale" },
+      el("span", { text: t("legendWorse") }),
+      el("span", { class: "swatches", "aria-hidden": "true" },
+        sw("--div-r3", "▼"), sw("--div-r2", "▼"), sw("--div-r1", "▼"), sw("--div-0"), sw("--div-b1", "▲"), sw("--div-b2", "▲"), sw("--div-b3", "▲")),
+      el("span", { text: t("legendBetter") })),
+    el("span", { class: "muted", text: t("legendSteps") }),
+    el("span", { class: "legend-scale" }, el("span", { class: "sw-s", "aria-hidden": "true" }), el("span", { text: t("srSuppressed") })),
   );
 
   const inds = META.indicators;
   const rows = DATA.tables[`${state.by}|${state.slice}`];
   const total = DATA.slices[state.slice];
-  const thead = el("thead", {}, el("tr", {},
-    el("th", { scope: "col" }, el("span", { class: "muted", style: "font-weight:500", text: DIM[state.by].label })),
-    inds.map((i) => el("th", { scope: "col", class: i.id === state.ind ? "active" : null },
-      el("button", { type: "button", "aria-pressed": String(i.id === state.ind), text: i.short, onclick: () => {
-        update({ ind: i.id });
-        const card = $("#dot-title").closest(".card");
-        if (card.getBoundingClientRect().top < 0) card.scrollIntoView({ behavior: "smooth", block: "start" });
-      } })))));
 
-  const cell = (level, n, est, ind, isTotal) => {
-    const td = el("td", { tabindex: 0 });
+  const cell = (rowLabel, n, est, ind, isTotal) => {
+    const td = el("td");
     if (!est) {
-      td.className = "s"; td.textContent = "x";
+      td.className = "s";
+      td.append(el("span", { "aria-hidden": "true", text: "x" }), srOnly(t("srSuppressed")));
     } else {
       const ref = total.est && total.est[ind.id];
       const diff = isTotal || !ref ? 0 : (est[0] - ref[0]) * (ind.better === "higher" ? 1 : -1);
-      const v = binFor(diff);
-      const bg = cssVar(v);
-      td.style.background = `var(${v})`;
-      td.style.color = isTotal ? "var(--ink)" : inkOn(bg);
+      const b = binFor(diff);
+      td.style.background = `var(${b.token})`;
+      td.style.color = isTotal ? "var(--ink)" : inkOn(cssVar(b.token));
+      if (b.dir) td.append(el("span", { class: "arrow", "aria-hidden": "true", text: b.dir > 0 ? "▲" : "▼" }));
       td.append(fmt1(est[0]));
-      if (est[3] === "E") td.append(el("span", { class: "flag", style: "color:inherit", text: "E" }));
+      if (est[3] === "E") td.append(el("span", { class: "flag", "aria-hidden": "true", style: "color:inherit", text: "E" }));
+      const sr = [b.dir > 0 ? t("srBetter") : b.dir < 0 ? t("srWorse") : null, est[3] === "E" ? t("srCaution") : null].filter(Boolean);
+      if (sr.length) td.append(srOnly(` (${sr.join(", ")})`));
     }
     bindTip(td, () => {
-      const out = [el("div", { class: "tt-name", text: `${ind.short} · ${level}` })];
-      if (!est) { out.push(el("div", { class: "tt-val", text: "Suppressed" })); return out; }
-      out.push(el("div", { class: "tt-val", text: `${fmt1(est[0])}%` }), el("div", { class: "tt-row", text: `95% CI ${fmt1(est[1])}–${fmt1(est[2])}` }));
+      const out = [el("div", { class: "tt-name", text: `${L(ind.short)} · ${rowLabel}` })];
+      if (!est) { out.push(el("div", { class: "tt-val", text: t("suppressed") })); return out; }
+      out.push(el("div", { class: "tt-val", text: pct(est[0]) }), el("div", { class: "tt-row", text: t("ci", { lo: fmt1(est[1]), hi: fmt1(est[2]) }) }));
       const ref = total.est && total.est[ind.id];
-      if (!isTotal && ref) {
-        const d = est[0] - ref[0];
-        out.push(el("div", { class: "tt-row", text: `${d >= 0 ? "+" : "−"}${fmt1(Math.abs(d))} pts vs overall (${ind.better} is better)` }));
-      }
-      if (n != null) out.push(el("div", { class: "tt-row", text: `≈ ${fmtN(n)} respondents` }));
+      if (!isTotal && ref) out.push(el("div", { class: "tt-row", text: `${t("vsGroup", { diff: signed(est[0] - ref[0]) })} (${t(ind.better === "higher" ? "higherBetter" : "lowerBetter")})` }));
+      if (n != null) out.push(el("div", { class: "tt-row", text: t("approxRespondents", { n: fmtN(n) }) }));
       return out;
     });
     return td;
   };
 
-  const tbody = el("tbody", {},
-    el("tr", { class: "total" }, el("th", { scope: "row", text: "Overall" }), inds.map((i) => cell("Overall", total.n, total.est && total.est[i.id], i, true))),
-    rows.map((r) => el("tr", {}, el("th", { scope: "row", title: r.level, text: r.level }),
-      inds.map((i) => cell(r.level, r.n, r.est && r.est[i.id], i, false)))));
+  const caption = t("heatCaption", { dim: dimLabel(state.by), slice: sliceLabel(state.slice) });
+  const table = el("table", { class: "heatmap" },
+    el("caption", { class: "sr-only", text: caption }),
+    el("thead", {}, el("tr", {},
+      el("th", { scope: "col" }, el("span", { class: "muted", style: "font-weight:500", text: dimLabel(state.by) })),
+      inds.map((i) => el("th", { scope: "col", class: i.id === state.ind ? "active" : null },
+        el("button", {
+          type: "button", "aria-pressed": String(i.id === state.ind), "data-fk": `heat-${i.id}`, text: L(i.short),
+          onclick: () => update({ ind: i.id }),
+        }))))),
+    el("tbody", {},
+      el("tr", { class: "total" }, el("th", { scope: "row", text: t("overall") }), inds.map((i) => cell(t("overall"), total.n, total.est && total.est[i.id], i, true))),
+      rows.map((r) => {
+        const name = levelLabel(state.by, r.level);
+        return el("tr", {}, el("th", { scope: "row", text: name }), inds.map((i) => cell(name, r.n, r.est && r.est[i.id], i, false)));
+      })));
 
-  $("#heatmap").replaceChildren(el("table", { class: "heatmap" }, thead, tbody));
+  const wrap = $("#heatmap");
+  wrap.setAttribute("role", "region");
+  wrap.setAttribute("tabindex", "0");
+  wrap.setAttribute("aria-label", t("scrollRegion", { name: t("heatTitle") }));
+  wrap.replaceChildren(table);
 }
 
-// ── About ───────────────────────────────────────────────────────────────────
+// ── About & accessibility ───────────────────────────────────────────────────
 function renderAbout() {
   const r = META.rules;
+  const nf = (v) => v.toLocaleString(locale());
   $("#about").replaceChildren(
     el("div", {},
-      el("h3", { text: "Only summaries reach this page" }),
-      el("p", { text: "Respondent-level answers never leave the secure environment. A build step aggregates them and publishes one small file of percentages and rounded counts — that file is all your browser downloads." }),
-      el("div", { class: "pipeline" },
-        el("span", { class: "lock", text: "🔒 Microdata" }), el("i", { text: "→" }),
-        el("span", { text: "DuckDB build" }), el("i", { text: "→" }),
-        el("span", { text: "aggregates.json" }), el("i", { text: "→" }),
-        el("span", { text: "This site" }))),
+      el("h3", { text: t("aboutOnlyTitle") }),
+      el("p", { text: t("aboutOnlyText") }),
+      el("ol", { class: "pipeline" },
+        el("li", { class: "lock", text: t("pipeMicro") }),
+        el("li", { text: t("pipeBuild") }),
+        el("li", { lang: "en", text: t("pipeFile") }),
+        el("li", { text: t("pipeSite") }))),
     el("div", {},
-      el("h3", { text: "Disclosure rules" }),
+      el("h3", { text: t("rulesTitle") }),
       el("ul", {},
-        el("li", { text: `Groups with fewer than ${r.min_cell} respondents are hidden (x).` }),
-        el("li", { text: `Extra groups are hidden where needed so a hidden value can’t be worked out from the total.` }),
-        el("li", { text: `Estimates with fewer than ${r.min_event} people on either side are hidden.` }),
-        el("li", { text: `Counts are rounded to the nearest ${r.round_base}.` }))),
+        el("li", { text: t("ruleMinCell", { n: nf(r.min_cell) }) }),
+        el("li", { text: t("ruleComp") }),
+        el("li", { text: t("ruleEvents", { n: nf(r.min_event) }) }),
+        el("li", { text: t("ruleRound", { n: nf(r.round_base) }) }))),
     el("div", {},
-      el("h3", { text: "Reading the estimates" }),
+      el("h3", { text: t("readTitle") }),
       el("ul", {},
-        el("li", { text: META.weighted ? "Percentages are weighted to represent the population." : "Percentages are unweighted." }),
-        el("li", { text: `E: coefficient of variation ${r.cv_e}–${r.cv_f}% — use with caution.` }),
-        el("li", { text: `Above ${r.cv_f}% the estimate is too unreliable and is hidden.` }),
-        el("li", { text: "Overlapping confidence intervals mean a difference may not be real." }))),
+        el("li", { text: META.weighted ? t("readWeighted") : t("readUnweighted") }),
+        el("li", { text: t("readE", { e: nf(r.cv_e), f: nf(r.cv_f) }) }),
+        el("li", { text: t("readF", { f: nf(r.cv_f) }) }),
+        el("li", { text: t("readCI") }))),
   );
+
+  const email = META.site.accessibility_contact;
+  const fb = $("#a11y-feedback");
+  if (email) {
+    const [before, after] = t("a11yFeedback", { email: "\u0000" }).split("\u0000");
+    fb.replaceChildren(before, el("a", { href: `mailto:${email}`, text: email }), after);
+    fb.hidden = false;
+  } else fb.hidden = true;
+
   const d = new Date(META.generated_at);
-  $("#footer-meta").textContent = `${META.site.footer || ""} Aggregates generated ${d.toLocaleDateString(LOCALE, { year: "numeric", month: "long", day: "numeric" })}.`.trim();
+  $("#footer-meta").textContent = `${L(META.site.footer) || ""} ${t("footerGenerated", { date: d.toLocaleDateString(locale(), { year: "numeric", month: "long", day: "numeric" }) })}`.trim();
 }
 
 // ── Orchestration ───────────────────────────────────────────────────────────
 function update(patch = {}) {
+  const fk = focusKey();
   Object.assign(state, patch);
   if (state.slice !== "all" && state.slice.startsWith(state.by + "=")) state.slice = "all";
   syncControls();
@@ -529,50 +732,63 @@ function update(patch = {}) {
   renderTable();
   renderHeatmap();
   writeURL();
+  restoreFocus(fk);
+  if (!update.ready) { update.ready = true; return; } // don't announce the initial render
+  const rows = currentRows();
+  announce(t("status", {
+    indicator: indLabel(state.ind), dim: dimLabel(state.by), slice: sliceLabel(state.slice),
+    shown: rows.filter((r) => r.est).length, total: rows.length,
+  }));
 }
 
 function initTheme() {
+  const root = document.documentElement;
+  const isDark = () => (root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches);
+  const sync = () => $("#theme-toggle").setAttribute("aria-pressed", String(isDark()));
   let saved = null;
   try { saved = localStorage.getItem("theme"); } catch { /* storage unavailable */ }
-  if (saved) document.documentElement.dataset.theme = saved;
+  if (saved) root.dataset.theme = saved;
+  sync();
   $("#theme-toggle").addEventListener("click", () => {
-    const dark = document.documentElement.dataset.theme
-      ? document.documentElement.dataset.theme === "dark"
-      : matchMedia("(prefers-color-scheme: dark)").matches;
-    const next = dark ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
+    const next = isDark() ? "light" : "dark";
+    root.dataset.theme = next;
     try { localStorage.setItem("theme", next); } catch { /* ignore */ }
+    sync();
     renderHeatmap(); // cell ink depends on resolved colours
   });
-  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => DATA && renderHeatmap());
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { sync(); if (DATA) renderHeatmap(); });
 }
 
 async function main() {
   initTheme();
+  initTooltip();
   try {
-    DATA = await (await fetch("data/aggregates.json")).json();
+    const res = await fetch("data/aggregates.json");
+    if (!res.ok) throw new Error(res.statusText);
+    DATA = await res.json();
   } catch (e) {
-    $("#main").prepend(el("p", { class: "card", text: "Couldn’t load the data. Please refresh the page." }));
+    const lang = (navigator.language || "en").startsWith("fr") ? "fr" : "en";
+    $("#main").prepend(el("p", { class: "card", role: "alert", text: STRINGS[lang].loadError }));
     throw e;
   }
   META = DATA.meta;
-  LOCALE = META.site.locale || "en-CA";
-  DEFAULTS = { ind: META.site.default_indicator, by: META.site.default_compare, slice: "all", sort: "natural", view: "chart" };
-  Object.assign(state, DEFAULTS);
-  document.title = META.site.title;
-  $("#site-title").textContent = META.site.title;
-  $("#site-eyebrow").textContent = META.site.eyebrow || "";
-  $("#site-lede").textContent = META.site.lede || "";
+  META.site.languages ||= ["en"];
+  META.site.default_language ||= META.site.languages[0];
   IND = Object.fromEntries(META.indicators.map((i) => [i.id, i]));
   DIM = Object.fromEntries(META.dimensions.map((d) => [d.id, d]));
+  DEFAULTS = { ind: META.site.default_indicator, by: META.site.default_compare, slice: "all", sort: "natural", view: "chart" };
+  Object.assign(state, DEFAULTS);
   readURL();
+  applyStaticText();
   buildControls();
+  initControls();
   renderAbout();
   update();
+
   let lastW = 0;
   new ResizeObserver(([e]) => {
     const w = Math.round(e.contentRect.width);
-    if (w && Math.abs(w - lastW) > 2) { lastW = w; renderDot(); }
+    if (w && Math.abs(w - lastW) > 2) { lastW = w; const fk = focusKey(); renderDot(); restoreFocus(fk); }
   }).observe($("#dot-chart").parentElement);
 }
 

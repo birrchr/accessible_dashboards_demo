@@ -187,7 +187,7 @@ venv.bak/
 .ropeproject
 
 # mkdocs/Zensical documentation
-/site
+# /site   ← removed from the template: site/ is this project's website, it must be committed
 
 # mypy
 .mypy_cache/

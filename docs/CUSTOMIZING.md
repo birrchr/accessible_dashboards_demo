@@ -35,25 +35,25 @@ make serve       # 4. look at it: http://localhost:8000 (refresh after each rebu
 
 ## 1. Change the wording on the page
 
-Everything above the filters, plus the footer, comes from the `[site]` section:
+Everything above the filters, plus the footer, comes from the `[site]` section. Text can be given
+per language (see [TRANSLATING.md](TRANSLATING.md)):
 
 ```toml
 [site]
-title    = "Community well-being at a glance"
-eyebrow  = "Example Foundation · 2025 survey"
-lede     = "Explore key well-being indicators by region, age and income."
-footer   = "Source: 2025 Community Well-being Survey."
-locale   = "en-CA"              # number/date format; "fr-CA" gives 12,5
+languages        = ["en", "fr"]
+default_language = "en"
+title   = { en = "Community well-being at a glance", fr = "Le bien-être communautaire en un coup d’œil" }
+eyebrow = { en = "Example Foundation · 2025 survey", fr = "Fondation Exemple · Enquête 2025" }
+lede    = { en = "Explore key indicators by region, age and income.", fr = "Explorez les principaux indicateurs selon la région, l’âge et le revenu." }
+footer  = { en = "Source: 2025 Community Well-being Survey.", fr = "Source : Enquête sur le bien-être communautaire 2025." }
+accessibility_contact = "accessibility@your-org.ca"   # AODA feedback contact, shown on the page
 
 default_indicator = "srh_good"  # must be an indicator id
 default_compare   = "province"  # must be a dimension column
 ```
 
 Run `make aggregate`. The page picks up the new text from the data file, so no HTML editing is needed.
-
-> **Bilingual site?** `locale` only changes number and date formats. Interface labels such as "Compare
-> by" and "Download CSV" are in `site/index.html` and `site/app.js`. The simplest approach is a
-> `site/fr/` copy with translated labels and its own `survey.toml` built with `--config` and `--output`.
+**English only?** Set `languages = ["en"]` and the language switch disappears.
 
 ---
 
@@ -65,10 +65,10 @@ existing `[[indicators]]` block and change it:
 ```toml
 [[indicators]]
 id     = "frequent_drinker"                     # unique; letters/digits/underscores; shows up in shared links
-label  = "Drinks alcohol 3+ times a week"       # chart titles and the dropdown
-short  = "Drinks 3+ times/week"                 # heatmap column header and tiles: keep it short
-theme  = "Lifestyle"                            # dropdown section; new names create new sections
-better = "lower"                                # "higher" or "lower": decides blue (better) vs red (worse)
+label  = { en = "Drinks alcohol 3+ times a week", fr = "Boit de l’alcool 3 fois ou plus par semaine" }  # titles, dropdown
+short  = { en = "Drinks 3+ times/week", fr = "Alcool 3+ fois/sem." }   # heatmap header, tiles: keep it short
+theme  = { en = "Lifestyle", fr = "Habitudes de vie" }  # dropdown section; new names create new sections
+better = "lower"                                # "higher" or "lower": decides better (▲ blue) vs worse (▼ red)
 when   = "alcohol_frequency = '3+ times/week'"  # DuckDB SQL condition over your columns
 ```
 
@@ -112,11 +112,16 @@ Dimensions are the **Compare by** chips and the **Narrow to** options.
 
 ```toml
 [[dimensions]]
-column = "education"                # column in the microdata
-label  = "Education"                # what users see
-levels = ["Less than high school", "High school diploma", "College / trades",
-          "Undergraduate degree", "Graduate degree"]   # display order
+column = "education"                                  # column in the microdata
+label  = { en = "Education", fr = "Scolarité" }       # what users see
+levels = [                                            # display order
+  { value = "Less than high school", fr = "Moins qu’un diplôme d’études secondaires" },
+  { value = "College / trades", en = "College or trades", fr = "Collège ou métiers" },
+  "Graduate degree",                                  # same text in every language
+]
 ```
+
+Each level is the **raw value in your data**, optionally with display text per language.
 
 - **Order of the groups:** the order of `levels`. Leave `levels` out to show every value found,
   sorted alphabetically.
@@ -133,21 +138,22 @@ categories or rename values:
 # Merge provinces into regions (also helps with small-cell suppression)
 [[dimensions]]
 column = "region"                   # a NEW name, since it isn't in the data
-label  = "Region"
+label  = { en = "Region", fr = "Région" }
 expr   = """
   CASE
     WHEN province IN ('Newfoundland', 'PEI', 'Nova Scotia', 'New Brunswick') THEN 'Atlantic'
     WHEN province IN ('Manitoba', 'Saskatchewan', 'Alberta') THEN 'Prairies'
     WHEN province IN ('Quebec', 'Ontario', 'British Columbia', 'Territories') THEN province
   END"""
-levels = ["Atlantic", "Quebec", "Ontario", "Prairies", "British Columbia", "Territories"]
+levels = [{ value = "Atlantic", fr = "Atlantique" }, { value = "Quebec", fr = "Québec" }, "Ontario",
+          "Prairies", { value = "British Columbia", fr = "Colombie-Britannique" }, { value = "Territories", fr = "Territoires" }]
 
 # Band a numeric age
 [[dimensions]]
 column = "age_band"
-label  = "Age"
+label  = { en = "Age", fr = "Âge" }
 expr   = "CASE WHEN age < 35 THEN '18–34' WHEN age < 55 THEN '35–54' ELSE '55+' END"
-levels = ["18–34", "35–54", "55+"]
+levels = [{ value = "18–34", fr = "18 à 34 ans" }, { value = "35–54", fr = "35 à 54 ans" }, { value = "55+", fr = "55 ans et plus" }]
 ```
 
 > **Mind the size.** The file has one table per (dimension × every group of every other dimension).
@@ -226,10 +232,10 @@ times: light, dark (from the OS setting) and dark (from the toggle). Change the 
 
 Tips:
 
+- **Run `make test` after any colour change.** `tests/test_contrast.py` checks every token against
+  WCAG AA (4.5:1 for text, 3:1 for controls and chart marks) in both themes and names the pairs that fail.
 - **Keep the heatmap scales one hue each**, getting darker (light mode) or brighter (dark mode).
   Blue/red is colour-blind friendly. Avoid green/red.
-- **Check contrast:** text on `--surface` should reach 4.5:1. The heatmap picks black or white text
-  per cell automatically.
 - **Custom font:** add a `<link>` to the font in `index.html`'s `<head>`, then set
   `--font: "Your Font", system-ui, sans-serif;`.
 
@@ -241,7 +247,8 @@ The site is three files with no build step. Edit them, then refresh the browser.
 
 | File | What's in it |
 |---|---|
-| `site/index.html` | Page structure: header, filter bar, the three cards, footer |
+| `site/index.html` | Page structure: header, filter bar, the cards, footer |
+| `site/i18n.js` | Interface text in each language (buttons, legends, screen-reader text) |
 | `site/styles.css` | Theme tokens, layout, mobile breakpoint (`@media (max-width: 720px)`) |
 | `site/app.js` | Organized into labelled sections: controls, tiles, dot plot, table + CSV, heatmap, about |
 
@@ -272,6 +279,12 @@ META.indicators, META.dimensions
 ```
 
 `n: null` means the whole group is suppressed. `est.<id>: null` means just that estimate is suppressed.
+Text in `meta` is per language (`{"en": "…", "fr": "…"}`). Use the `L()` helper in `app.js` to pick
+the current one, and `levelLabel(dim, value)` for group names.
+
+**Accessibility rules for new charts:** give every chart a table equivalent, put `aria-hidden` on
+decorative SVG, give each meaningful mark an accessible name, never put interface words directly in
+`app.js` (add them to `i18n.js`), and run `make test-a11y`. See [ACCESSIBILITY.md](ACCESSIBILITY.md).
 
 **Use a charting library instead?** You can. For example, Observable Plot or Chart.js loaded from
 a CDN. The data shape above maps straight to a dot or bar chart. Keep the table view and the
@@ -288,6 +301,8 @@ a CDN. The data shape above maps straight to a dot or bar chart. Keep the table 
 | `❌ Dimension column 'x' not found` | The message lists available columns. Check the spelling, or use `expr`. |
 | `⚠️ configured levels not in data` | A value in `levels` doesn't match the data exactly. Check spaces, dashes (– vs -) and capitals. |
 | `test_file_matches_config` fails | You edited the config but didn't rebuild. Run `make aggregate`. |
+| `test_survey_text_has_every_language` fails | A label is missing a language. The message names it. |
+| `test_contrast` fails | A colour you changed is too light or dark. The message gives the pair and its ratio. |
 | Page says "Couldn't load the data" | You opened `index.html` as a file. Use `make serve`, because browsers block loading data from `file://`. |
 | A group shows as **x** everywhere | It's below `min_cell`, or hidden to protect a smaller group. That's working as intended. Merge groups with `expr` if it matters. |
 | Lots of **E** flags or hidden estimates | Rare outcomes in small groups aren't reliable. Compare by broader groups. |

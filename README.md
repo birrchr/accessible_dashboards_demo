@@ -1,15 +1,17 @@
 # Confidential Survey Dashboard
 
-**Publish interactive survey results as a fast static website, without sending respondent data to the browser.**
+**Publish interactive, bilingual and accessible survey results as a fast static website, without sending respondent data to the browser.**
 
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![No JS dependencies](https://img.shields.io/badge/javascript-zero%20dependencies-brightgreen)
+![WCAG 2.2 AA](https://img.shields.io/badge/WCAG-2.2%20AA-005a9c)
+![English / Français](https://img.shields.io/badge/lang-EN%20%7C%20FR-red)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
 <p align="center">
   <img src="docs/images/desktop.png" alt="Desktop view: indicator dropdown, compare-by chips, headline tiles and a dot chart of estimates by province with confidence intervals" width="62%">
-  <img src="docs/images/mobile.png" alt="Mobile view: compact filter summary bar, headline tiles and dot chart" width="18%">
-  <img src="docs/images/mobile-filters.png" alt="Mobile filters open as a bottom sheet" width="18%">
+  <img src="docs/images/mobile.png" alt="Mobile view in French: compact filter summary bar and headline tiles" width="18%">
+  <img src="docs/images/mobile-filters.png" alt="Mobile filters, in French, open as a modal bottom sheet" width="18%">
 </p>
 
 A private build step uses Python and DuckDB to turn respondent-level microdata into **one small JSON file of
@@ -17,6 +19,8 @@ disclosure-controlled aggregates**. A dependency-free web page then turns that f
 interactive dashboard that works on phones and desktops.
 
 - 🔒 **Confidential by design.** The browser only ever gets percentages, confidence intervals and rounded counts. Small groups are suppressed automatically, and the tests fail if anything unsafe gets through.
+- ♿ **Accessible.** Built and tested for WCAG 2.2 AA and AODA: it works with screen readers, keyboard only, voice control and 400% zoom. Every chart has a table view, and axe-core runs in CI. See [docs/ACCESSIBILITY.md](docs/ACCESSIBILITY.md).
+- 🇨🇦 **English and French.** One click switches every label, number format and screen-reader message. Labels live in the config, and tests fail if a translation is missing. Add more languages the same way.
 - 📱 **Built for phones too.** Filters become a bottom sheet, tap targets are large, and nothing relies on hover.
 - 🎛️ **The user is in control.** They pick the indicator, compare across groups, narrow to a group, switch to a table, and download or share the exact view.
 - ⚙️ **One config file.** Indicators, groups, labels, wording and disclosure rules all live in [`config/survey.toml`](config/survey.toml).
@@ -104,9 +108,11 @@ flowchart LR
 │   ├── index.html               ← page structure
 │   ├── styles.css               ← colours, fonts, layout (brand tokens at the top)
 │   ├── app.js                   ← charts, filters, interactions
+│   ├── i18n.js                  ← interface text in English and French
 │   └── data/aggregates.json     ← the ONLY data the browser sees
-├── tests/                       ← safety checks (run with `make test`)
-├── docs/                        ← guides: customizing, disclosure, deploying
+├── tests/                       ← safety, contrast and translation checks (`make test`)
+│   └── a11y/                    ← browser accessibility tests (`make test-a11y`)
+├── docs/                        ← guides: customizing, translating, accessibility, disclosure, deploying
 ├── .github/workflows/           ← CI + GitHub Pages deployment
 ├── .gitlab-ci.yml               ← the same for GitLab
 ├── Makefile                     ← shortcuts: make all / aggregate / test / serve
@@ -122,7 +128,7 @@ flowchart LR
    - `[source]`: the file path, its format and your weight column.
    - `[[dimensions]]`: the groups users can compare and filter by.
    - `[[indicators]]`: what to measure. Each one is a yes/no SQL condition.
-   - `[site]`: title, intro text and default view.
+   - `[site]`: title, intro text, languages, accessibility contact and default view.
 3. **Rebuild and check:** `make aggregate && make test`
 4. **Preview:** `make serve`
 5. **Publish:** commit `site/data/aggregates.json` (never the microdata) and push. See [docs/DEPLOYING.md](docs/DEPLOYING.md).
@@ -138,7 +144,9 @@ flowchart LR
 | `make setup` | Install or update Python dependencies into `.venv/` |
 | `make demo-data` | Generate synthetic microdata (skip this with real data) |
 | `make aggregate` | Rebuild `site/data/aggregates.json` from the config |
-| `make test` | Run every safety and correctness check |
+| `make test` | Data safety, colour contrast and translation checks (fast, no browser) |
+| `make browser` | One-time: install Chromium for the accessibility tests |
+| `make test-a11y` | Browser accessibility tests: axe-core WCAG 2.2 AA, keyboard, reflow, EN and FR |
 | `make serve` | Preview the site at http://localhost:8000 (`make serve PORT=9000` to change port) |
 | `make all` | setup → demo-data → aggregate → test |
 
@@ -149,6 +157,8 @@ flowchart LR
 | Guide | Read it when you want to… |
 |---|---|
 | [docs/CUSTOMIZING.md](docs/CUSTOMIZING.md) | change indicators, groups, wording, colours or charts |
+| [docs/TRANSLATING.md](docs/TRANSLATING.md) | edit the French, or add another language |
+| [docs/ACCESSIBILITY.md](docs/ACCESSIBILITY.md) | understand how WCAG 2.2 AA and AODA are met, and test before launch |
 | [docs/DISCLOSURE.md](docs/DISCLOSURE.md) | understand or tune the confidentiality rules, and their limits |
 | [docs/DEPLOYING.md](docs/DEPLOYING.md) | publish to GitHub Pages, GitLab Pages, Azure or elsewhere |
 
