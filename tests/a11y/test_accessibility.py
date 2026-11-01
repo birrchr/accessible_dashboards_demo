@@ -131,8 +131,13 @@ def test_changes_are_announced(open_page):
 
 # ── Reflow, spacing, target size (WCAG 1.4.10, 1.4.12, 2.5.8) ──────────────
 @pytest.mark.parametrize("lang", ["en", "fr"])
-def test_reflow_at_320px(open_page, lang):
+@pytest.mark.parametrize("font", [None, "DejaVu Sans", "Verdana"], ids=["default-font", "dejavu", "verdana"])
+def test_reflow_at_320px(open_page, lang, font):
+    """Fonts differ by OS; wide fallbacks (DejaVu on Linux, Verdana) are where overflow shows up."""
     page = open_page(f"?lang={lang}", viewport={"width": 320, "height": 640})
+    if font:
+        page.add_style_tag(content=f":root {{ --font: '{font}', sans-serif; }}")
+        page.wait_for_timeout(200)
     overflow = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
     assert overflow <= 0, f"page scrolls sideways by {overflow}px at 320px (data tables may scroll inside their own region)"
 

@@ -97,6 +97,8 @@ button, select { font: inherit; color: inherit; }
 /* ── Header ─────────────────────────────────────────────────────────────── */
 .site-header { padding: 28px 0 18px; }
 .header-inner { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; }
+.header-inner > div:first-child { min-width: 0; flex: 1 1 auto; }
+h1, h2, h3, .tile-label, .tile-note { overflow-wrap: break-word; hyphens: auto; -webkit-hyphens: auto; }
 .eyebrow { margin: 0 0 6px; color: var(--ink-2); font-size: 13px; font-weight: 600; letter-spacing: .02em; }
 h1 { font-size: clamp(26px, 4vw, 36px); font-weight: 700; letter-spacing: -.01em; }
 .lede { margin: 8px 0 0; color: var(--ink-2); max-width: 62ch; }
