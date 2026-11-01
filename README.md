@@ -41,8 +41,8 @@ interactive dashboard that works on phones and desktops.
 uv installs the right Python for you, so you don't need Python already.
 
 ```bash
-git clone https://github.com/<your-account>/confidential-survey-dashboard.git
-cd confidential-survey-dashboard
+git clone https://github.com/birrchr/accessible_dashboards_demo.git
+cd accessible_dashboards_demo
 
 make all      # install → generate demo data → build aggregates → run safety checks
 make serve    # open http://localhost:8000
