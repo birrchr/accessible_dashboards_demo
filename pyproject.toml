@@ -17,9 +17,16 @@ demo = [
     "pyarrow>=15",
     "faker>=24",
 ]
+# Browser-based accessibility tests (axe-core + keyboard/reflow checks). See docs/ACCESSIBILITY.md.
+# After `uv sync`, install the browser once:  uv run playwright install chromium
+a11y = [
+    "playwright==1.63.0",
+    "axe-playwright-python>=0.1.8",
+]
 dev = [
     "pytest>=8",
     { include-group = "demo" },
+    { include-group = "a11y" },
 ]
 
 [tool.uv]
@@ -28,4 +35,5 @@ package = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q -m 'not a11y'"
+markers = ["a11y: browser accessibility tests (run with `make test-a11y`)"]

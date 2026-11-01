@@ -7,7 +7,7 @@ Run this wherever the raw data lives, before publishing.
 import duckdb
 import pytest
 
-from conftest import ROOT
+from tests.conftest import ROOT
 
 
 @pytest.fixture(scope="module")

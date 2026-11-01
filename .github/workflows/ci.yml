@@ -1,6 +1,7 @@
 # Runs on every push and pull request.
 #  • checks  — tests the committed public file + the suppression logic (no microdata needed)
 #  • demo    — proves the whole pipeline works end to end on synthetic data
+#  • a11y    — WCAG 2.2 AA checks in a real browser (axe-core, keyboard, reflow), EN and FR
 name: CI
 
 on:
@@ -27,3 +28,13 @@ jobs:
       - run: uv run python pipeline/build_aggregates.py
       - name: Tests, including checks against the microdata
         run: uv run pytest
+
+  a11y:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --locked
+      - run: uv run playwright install --with-deps chromium
+      - name: Accessibility tests (WCAG 2.2 AA)
+        run: uv run pytest -m a11y tests/a11y

@@ -31,7 +31,10 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - run: uv sync --locked
       - name: Refuse to publish if the public file fails its checks
-        run: uv run pytest tests/test_public_file.py
+        run: uv run pytest tests/test_public_file.py tests/test_i18n.py tests/test_contrast.py
+      - run: uv run playwright install --with-deps chromium
+      - name: Refuse to publish if accessibility checks fail
+        run: uv run pytest -m a11y tests/a11y
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:

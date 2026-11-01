@@ -78,11 +78,76 @@ def load_config(path: Path) -> dict:
         raise ConfigError("The same column is listed twice under [[dimensions]]")
 
     site = cfg["site"]
+    langs = site.setdefault("languages", ["en"])
+    if not langs or not all(isinstance(x, str) and re.fullmatch(r"[a-z]{2}", x) for x in langs):
+        raise ConfigError('[site] languages must be a list of 2-letter codes, e.g. ["en", "fr"]')
+    site.setdefault("default_language", langs[0])
+    if site["default_language"] not in langs:
+        raise ConfigError(f"[site] default_language {site['default_language']!r} is not in languages {langs}")
     if site.get("default_indicator") not in ids:
         raise ConfigError(f"[site] default_indicator {site.get('default_indicator')!r} is not an indicator id")
     if site.get("default_compare") not in cols:
         raise ConfigError(f"[site] default_compare {site.get('default_compare')!r} is not a dimension column")
+    localize(cfg)
     return cfg
+
+
+# ── Languages ────────────────────────────────────────────────────────────────
+SITE_TEXT = ("title", "eyebrow", "lede", "footer")
+LANG_WARNINGS: list[str] = []
+
+
+def text(value, langs: list[str], where: str) -> dict:
+    """Normalize "text" or {en=..., fr=...} into {lang: text} for every language."""
+    if isinstance(value, str):
+        if len(langs) > 1:
+            LANG_WARNINGS.append(f"{where}: one text for all languages ({value!r})")
+        return {lang: value for lang in langs}
+    if isinstance(value, dict):
+        unknown = set(value) - set(langs) - {"value"}
+        if unknown:
+            raise ConfigError(f"{where}: unknown language code(s) {sorted(unknown)}; [site] languages = {langs}")
+        fallback = value.get(langs[0]) or value.get("value") or next(iter(value.values()), "")
+        out = {}
+        for lang in langs:
+            if value.get(lang):
+                out[lang] = value[lang]
+            else:
+                if "value" not in value:  # levels fall back to the raw value silently
+                    LANG_WARNINGS.append(f"{where}: missing {lang!r} text, using {fallback!r}")
+                out[lang] = fallback
+        return out
+    raise ConfigError(f"{where}: expected text or {{ en = \"…\", fr = \"…\" }}, got {value!r}")
+
+
+def localize(cfg: dict) -> None:
+    """Turn every user-facing text in the config into {lang: text}, in place (idempotent)."""
+    if cfg.get("_localized"):
+        return
+    cfg["_localized"] = True
+    langs = cfg["site"].setdefault("languages", ["en"])
+    cfg["site"].setdefault("default_language", langs[0])
+    for k in SITE_TEXT:
+        if k in cfg["site"]:
+            cfg["site"][k] = text(cfg["site"][k], langs, f"[site] {k}")
+    for d in cfg["dimensions"]:
+        d["label"] = text(d["label"], langs, f"dimension {d['column']!r} label")
+        if "levels" in d:
+            raw, labels = [], {}
+            for lvl in d["levels"]:
+                if isinstance(lvl, dict):
+                    if "value" not in lvl:
+                        raise ConfigError(f"dimension {d['column']!r}: level {lvl} needs a `value`")
+                    v = str(lvl["value"])
+                    labels[v] = text(lvl, langs, f"dimension {d['column']!r} level {v!r}")
+                else:
+                    v = str(lvl)
+                    labels[v] = {lang: v for lang in langs}
+                raw.append(v)
+            d["levels"], d["level_labels"] = raw, labels
+    for i in cfg["indicators"]:
+        for k in ("label", "short", "theme"):
+            i[k] = text(i[k], langs, f"indicator {i['id']!r} {k}")
 
 
 def source_sql(src: dict) -> str:
@@ -103,6 +168,7 @@ def quote(v: str) -> str:
 
 # ── Build ────────────────────────────────────────────────────────────────────
 def build(cfg: dict, output: Path) -> dict:
+    localize(cfg)
     rules = cfg["rules"]
     MIN_CELL, MIN_EVENT, BASE = rules["min_cell"], rules["min_event"], rules["round_base"]
     CV_E, CV_F = rules["cv_e"], rules["cv_f"]
@@ -160,6 +226,7 @@ def build(cfg: dict, output: Path) -> dict:
                 print(f"ℹ️  {d['column']}: values in data but not in config (excluded from that dimension): {extra}")
         else:
             d["levels"] = found
+            d["level_labels"] = {v: {lang: v for lang in cfg["site"]["languages"]} for v in found}
 
     aggs = ["COUNT(*) AS n"]
     for i in inds:
@@ -256,7 +323,10 @@ def build(cfg: dict, output: Path) -> dict:
             "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "rules": {k: rules[k] for k in ("min_cell", "min_event", "round_base", "cv_e", "cv_f")},
             "weighted": bool(weight),
-            "dimensions": [{"id": d["column"], "label": d["label"], "levels": d["levels"]} for d in dims],
+            "dimensions": [
+                {"id": d["column"], "label": d["label"], "levels": d["levels"], "level_labels": d["level_labels"]}
+                for d in dims
+            ],
             "indicators": [{k: i[k] for k in ("id", "label", "short", "theme", "better")} for i in inds],
         },
         "slices": slices,
@@ -275,6 +345,8 @@ def main() -> int:
     try:
         cfg = load_config(args.config)
         stats = build(cfg, args.output)
+        for w in LANG_WARNINGS:
+            print(f"🌐 {w}")
     except ConfigError as e:
         print(f"❌ {e}", file=sys.stderr)
         return 1

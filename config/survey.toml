@@ -3,16 +3,27 @@
 #
 #  After editing, rebuild the public data file:   make aggregate
 #  Then check it is safe to publish:               make test
-#  See docs/CUSTOMIZING.md for worked examples of every section below.
+#  See docs/CUSTOMIZING.md for worked examples, docs/TRANSLATING.md for languages.
+#
+#  TEXT IN SEVERAL LANGUAGES
+#  Any text value can be either:
+#     label = "Province"                              ← same text in every language
+#     label = { en = "Age group", fr = "Groupe d’âge" } ← one per language
+#  `make aggregate` warns about any text that is missing a language.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── Text shown on the website ────────────────────────────────────────────────
+# ── Website ──────────────────────────────────────────────────────────────────
 [site]
-title    = "How healthy are Canadians?"
-eyebrow  = "CanHealth 2024 · Fictitious survey"
-lede     = "Explore 13 health indicators across provinces, age, gender, income and education. Pick an indicator, choose how to compare, and narrow to a group."
-footer   = "CanHealth 2024 (fictitious survey). Synthetic data for demonstration."
-locale   = "en-CA"              # number and date formatting
+languages        = ["en", "fr"]   # first visit picks the browser's language if listed, else default_language
+default_language = "en"
+
+title   = { en = "How healthy are people in Canada?", fr = "Quel est l’état de santé de la population canadienne?" }
+eyebrow = { en = "CanHealth 2024 · Fictitious survey", fr = "CanHealth 2024 · Enquête fictive" }
+lede    = { en = "Explore 13 health indicators by province, age, gender, income and education. Pick an indicator, choose how to compare, and narrow to a group if you like.", fr = "Explorez 13 indicateurs de santé selon la province, l’âge, le genre, le revenu et la scolarité. Choisissez un indicateur, la façon de comparer et, au besoin, un groupe précis." }
+footer  = { en = "CanHealth 2024 (fictitious survey). Synthetic data for demonstration.", fr = "CanHealth 2024 (enquête fictive). Données synthétiques à des fins de démonstration." }
+
+# Accessibility feedback (required by AODA IASR s.11). Shown in the footer and accessibility statement.
+accessibility_contact = "accessibility@example.org"
 
 # Default view when someone opens the page with no link parameters.
 default_indicator = "srh_good"
@@ -40,35 +51,73 @@ cv_f       = 33.3               # CV (%) above which an estimate is hidden
 #          expr = "CASE WHEN age < 35 THEN 'Under 35' ELSE '35+' END"
 # label  = what users see
 # levels = values to show, in display order. Values not listed are ignored.
+#          Each is either the raw value ("Ontario") or a table that gives display
+#          text per language: { value = "PEI", en = "Prince Edward Island", fr = "Île-du-Prince-Édouard" }
+#          (a missing language falls back to `value`).
 #          Leave levels out to use every value found, sorted alphabetically.
 # The order of the [[dimensions]] blocks is the order of the "Compare by" chips.
 
 [[dimensions]]
 column = "province"
-label  = "Province"
-levels = ["Newfoundland", "PEI", "Nova Scotia", "New Brunswick", "Quebec", "Ontario",
-          "Manitoba", "Saskatchewan", "Alberta", "British Columbia", "Territories"]
+label  = { en = "Province or territory", fr = "Province ou territoire" }
+levels = [
+  { value = "Newfoundland",     en = "Newfoundland and Labrador", fr = "Terre-Neuve-et-Labrador" },
+  { value = "PEI",              en = "Prince Edward Island",      fr = "Île-du-Prince-Édouard" },
+  { value = "Nova Scotia",                                        fr = "Nouvelle-Écosse" },
+  { value = "New Brunswick",                                      fr = "Nouveau-Brunswick" },
+  { value = "Quebec",                                             fr = "Québec" },
+  "Ontario",
+  "Manitoba",
+  "Saskatchewan",
+  "Alberta",
+  { value = "British Columbia",                                   fr = "Colombie-Britannique" },
+  { value = "Territories",                                        fr = "Territoires" },
+]
 
 [[dimensions]]
 column = "age_group"
-label  = "Age group"
-levels = ["18–24", "25–34", "35–44", "45–54", "55–64", "65–74", "75+"]
+label  = { en = "Age group", fr = "Groupe d’âge" }
+levels = [
+  { value = "18–24", fr = "18 à 24 ans" },
+  { value = "25–34", fr = "25 à 34 ans" },
+  { value = "35–44", fr = "35 à 44 ans" },
+  { value = "45–54", fr = "45 à 54 ans" },
+  { value = "55–64", fr = "55 à 64 ans" },
+  { value = "65–74", fr = "65 à 74 ans" },
+  { value = "75+",   fr = "75 ans et plus" },
+]
 
 [[dimensions]]
 column = "gender"
-label  = "Gender"
-levels = ["Woman", "Man", "Non-binary / Other", "Prefer not to say"]
+label  = { en = "Gender", fr = "Genre" }
+levels = [
+  { value = "Woman",              fr = "Femme" },
+  { value = "Man",                fr = "Homme" },
+  { value = "Non-binary / Other", en = "Non-binary or other", fr = "Non binaire ou autre" },
+  { value = "Prefer not to say",  fr = "Préfère ne pas répondre" },
+]
 
 [[dimensions]]
 column = "income_bracket"
-label  = "Household income"
-levels = ["Under $30K", "$30K–$59K", "$60K–$99K", "$100K–$149K", "$150K+"]
+label  = { en = "Household income", fr = "Revenu du ménage" }
+levels = [
+  { value = "Under $30K",   en = "Under $30,000",       fr = "Moins de 30 000 $" },
+  { value = "$30K–$59K",    en = "$30,000 to $59,999",  fr = "30 000 $ à 59 999 $" },
+  { value = "$60K–$99K",    en = "$60,000 to $99,999",  fr = "60 000 $ à 99 999 $" },
+  { value = "$100K–$149K",  en = "$100,000 to $149,999", fr = "100 000 $ à 149 999 $" },
+  { value = "$150K+",       en = "$150,000 or more",    fr = "150 000 $ et plus" },
+]
 
 [[dimensions]]
 column = "education"
-label  = "Education"
-levels = ["Less than high school", "High school diploma", "College / trades",
-          "Undergraduate degree", "Graduate degree"]
+label  = { en = "Education", fr = "Scolarité" }
+levels = [
+  { value = "Less than high school",                fr = "Moins qu’un diplôme d’études secondaires" },
+  { value = "High school diploma",                  fr = "Diplôme d’études secondaires" },
+  { value = "College / trades", en = "College or trades", fr = "Collège ou métiers" },
+  { value = "Undergraduate degree",                 fr = "Baccalauréat" },
+  { value = "Graduate degree",                      fr = "Diplôme d’études supérieures" },
+]
 
 # ── Indicators: what gets measured ───────────────────────────────────────────
 # Every indicator is "% of people for whom `when` is true".
@@ -81,105 +130,105 @@ levels = ["Less than high school", "High school diploma", "College / trades",
 #          NULL are excluded from that indicator's denominator.
 
 [[indicators]]
-id = "srh_good"
-label = "Very good or excellent health"
-short = "Very good / excellent health"
-theme = "General health"
+id     = "srh_good"
+label  = { en = "Very good or excellent health", fr = "Santé très bonne ou excellente" }
+short  = { en = "Very good / excellent health", fr = "Santé très bonne / excellente" }
+theme  = { en = "General health", fr = "Santé générale" }
 better = "higher"
-when = "self_rated_health IN ('Very good', 'Excellent')"
+when   = "self_rated_health IN ('Very good', 'Excellent')"
 
 [[indicators]]
-id = "any_chronic"
-label = "Has a chronic condition"
-short = "Any chronic condition"
-theme = "Chronic conditions"
+id     = "any_chronic"
+label  = { en = "Has a chronic condition", fr = "A une maladie chronique" }
+short  = { en = "Any chronic condition", fr = "Maladie chronique" }
+theme  = { en = "Chronic conditions", fr = "Maladies chroniques" }
 better = "lower"
-when = "any_chronic = 1"
+when   = "any_chronic = 1"
 
 [[indicators]]
-id = "hypertension"
-label = "High blood pressure"
-short = "High blood pressure"
-theme = "Chronic conditions"
+id     = "hypertension"
+label  = { en = "High blood pressure", fr = "Hypertension artérielle" }
+short  = { en = "High blood pressure", fr = "Hypertension" }
+theme  = { en = "Chronic conditions", fr = "Maladies chroniques" }
 better = "lower"
-when = "hypertension = 1"
+when   = "hypertension = 1"
 
 [[indicators]]
-id = "diabetes"
-label = "Diabetes"
-short = "Diabetes"
-theme = "Chronic conditions"
+id     = "diabetes"
+label  = { en = "Diabetes", fr = "Diabète" }
+short  = { en = "Diabetes", fr = "Diabète" }
+theme  = { en = "Chronic conditions", fr = "Maladies chroniques" }
 better = "lower"
-when = "diabetes = 1"
+when   = "diabetes = 1"
 
 [[indicators]]
-id = "arthritis"
-label = "Arthritis"
-short = "Arthritis"
-theme = "Chronic conditions"
+id     = "arthritis"
+label  = { en = "Arthritis", fr = "Arthrite" }
+short  = { en = "Arthritis", fr = "Arthrite" }
+theme  = { en = "Chronic conditions", fr = "Maladies chroniques" }
 better = "lower"
-when = "arthritis = 1"
+when   = "arthritis = 1"
 
 [[indicators]]
-id = "heart_disease"
-label = "Heart disease"
-short = "Heart disease"
-theme = "Chronic conditions"
+id     = "heart_disease"
+label  = { en = "Heart disease", fr = "Maladie cardiaque" }
+short  = { en = "Heart disease", fr = "Maladie cardiaque" }
+theme  = { en = "Chronic conditions", fr = "Maladies chroniques" }
 better = "lower"
-when = "heart_disease = 1"
+when   = "heart_disease = 1"
 
 [[indicators]]
-id = "depression"
-label = "Depression"
-short = "Depression"
-theme = "Mental health"
+id     = "depression"
+label  = { en = "Depression", fr = "Dépression" }
+short  = { en = "Depression", fr = "Dépression" }
+theme  = { en = "Mental health", fr = "Santé mentale" }
 better = "lower"
-when = "depression = 1"
+when   = "depression = 1"
 
 [[indicators]]
-id = "anxiety"
-label = "Anxiety"
-short = "Anxiety"
-theme = "Mental health"
+id     = "anxiety"
+label  = { en = "Anxiety", fr = "Anxiété" }
+short  = { en = "Anxiety", fr = "Anxiété" }
+theme  = { en = "Mental health", fr = "Santé mentale" }
 better = "lower"
-when = "anxiety = 1"
+when   = "anxiety = 1"
 
 [[indicators]]
-id = "obesity"
-label = "Obesity (BMI 30 or more)"
-short = "Obesity"
-theme = "Lifestyle"
+id     = "obesity"
+label  = { en = "Obesity (BMI 30 or more)", fr = "Obésité (IMC de 30 ou plus)" }
+short  = { en = "Obesity", fr = "Obésité" }
+theme  = { en = "Lifestyle", fr = "Habitudes de vie" }
 better = "lower"
-when = "bmi >= 30"
+when   = "bmi >= 30"
 
 [[indicators]]
-id = "active"
-label = "Active 150+ minutes a week"
-short = "Active 150+ min/week"
-theme = "Lifestyle"
+id     = "active"
+label  = { en = "Active 150+ minutes a week", fr = "Actif 150 minutes ou plus par semaine" }
+short  = { en = "Active 150+ min/week", fr = "Actif 150+ min/sem." }
+theme  = { en = "Lifestyle", fr = "Habitudes de vie" }
 better = "higher"
-when = "physical_activity LIKE 'Moderate%' OR physical_activity LIKE 'High%'"
+when   = "physical_activity LIKE 'Moderate%' OR physical_activity LIKE 'High%'"
 
 [[indicators]]
-id = "smoker"
-label = "Currently smokes"
-short = "Current smoker"
-theme = "Lifestyle"
+id     = "smoker"
+label  = { en = "Currently smokes", fr = "Fume actuellement" }
+short  = { en = "Current smoker", fr = "Fumeur actuel" }
+theme  = { en = "Lifestyle", fr = "Habitudes de vie" }
 better = "lower"
-when = "smoking_status LIKE 'Current%'"
+when   = "smoking_status LIKE 'Current%'"
 
 [[indicators]]
-id = "family_doctor"
-label = "Has a family doctor"
-short = "Has family doctor"
-theme = "Access to care"
+id     = "family_doctor"
+label  = { en = "Has a family doctor", fr = "A un médecin de famille" }
+short  = { en = "Has family doctor", fr = "Médecin de famille" }
+theme  = { en = "Access to care", fr = "Accès aux soins" }
 better = "higher"
-when = "has_family_doctor = 1"
+when   = "has_family_doctor = 1"
 
 [[indicators]]
-id = "unmet_need"
-label = "Unmet health care need"
-short = "Unmet care need"
-theme = "Access to care"
+id     = "unmet_need"
+label  = { en = "Unmet health care need", fr = "Besoin de soins de santé non comblé" }
+short  = { en = "Unmet care need", fr = "Besoin non comblé" }
+theme  = { en = "Access to care", fr = "Accès aux soins" }
 better = "lower"
-when = "unmet_care_need = 1"
+when   = "unmet_care_need = 1"
